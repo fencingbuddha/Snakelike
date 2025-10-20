@@ -1,11 +1,12 @@
+import { StatusBar } from 'expo-status-bar';
 import React from 'react';
-import { SafeAreaView, StatusBar, StyleSheet, View } from 'react-native';
+import { SafeAreaView, StyleSheet, View } from 'react-native';
 import Game from './src/Game';
 
 export default function App() {
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar style="light" />
       <View style={styles.gameWrapper}>
         <Game />
       </View>
