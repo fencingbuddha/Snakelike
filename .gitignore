@@ -1,0 +1,32 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# macOS
+.DS_Store
+
+# Xcode
+ios/Pods/
+ios/build/
+ios/DerivedData/
+*.xccheckout
+*.xcscmblueprint
+
+# Android
+android/.gradle/
+android/app/build/
+android/build/
+*.iml
+.gradle/
+
+# React Native bundler
+.expo/
+.expo-shared/
+metro-cache/
+buck-out/
+
+# Misc tooling
+.vscode/
+.idea/
