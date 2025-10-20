@@ -1,50 +1,31 @@
 # Snakelike
 
-Chromatic Current is a cross-platform mobile twist on the classic snake formula powered by the
-React Native CLI. Glide through a neon grid while collecting elemental blooms to keep your harmony
-meter charged. Mixing colors grants speed and scoring bonuses, while repeating the same energy
-destabilises the run. Stack phase turns to slip through your own body and outmaneuver the board as
-the tempo increases.
+Chromatic Current is a cross-platform mobile twist on the classic snake formula built with Expo
+and React Native. Glide through a neon grid while collecting elemental blooms to keep your
+harmony meter charged. Mixing colors grants speed and scoring bonuses, while repeating the same
+energy destabilises the run. Stack phase turns to slip through your own body and outmaneuver the
+board as the tempo increases.
 
-## Native setup (no Expo)
+## Getting started
 
 1. **Install dependencies**
    ```bash
    npm install
    ```
 
-2. **Generate native scaffolding** – copies the stock iOS/Android projects from the React Native
-   template into this repository. Run this once or whenever you need to regenerate the platform
-   folders.
-   ```bash
-   npm run bootstrap:native
-   ```
-
-3. **Install iOS pods** – Requires the CocoaPods toolchain (`sudo gem install cocoapods` if you
-   don't already have it).
-   ```bash
-   cd ios
-   pod install
-   cd ..
-   ```
-
-4. **Start Metro**
+2. **Run the development server**
    ```bash
    npm run start
    ```
+   Use the Expo CLI output to launch the app on iOS Simulator, Android Emulator, or an Expo Go
+   device.
 
-5. **Run on a cabled iPhone**
-   - Connect your device via USB and trust the computer.
-   - Open `ios/Snakelike.xcworkspace` in Xcode, select your phone as the run target, assign your
-     Apple developer team under **Signing & Capabilities**, then press **Run**.
-   - Alternatively, from the terminal you can run
-     ```bash
-     npm run ios -- --device "Your iPhone Name"
-     ```
-     (requires Xcode Command Line Tools).
-
-6. **Android (optional)** – With the Android SDK installed, you can launch an emulator or connected
-   device via `npm run android` after completing step 2.
+3. **Optional platform shortcuts**
+   ```bash
+   npm run ios
+   npm run android
+   npm run web
+   ```
 
 ## Gameplay overview
 
@@ -65,10 +46,8 @@ the tempo increases.
 ```
 .
 ├── App.tsx           # App entry point
-├── app.json          # App name metadata for React Native CLI
-├── package.json      # Dependencies, Metro/Jest config, and RN scripts
-├── scripts/
-│   └── bootstrap-native.js # Copies stock ios/android templates from react-native
+├── app.json          # Expo configuration
+├── package.json      # Dependencies and scripts
 ├── src/
 │   └── Game.tsx      # Core game loop and UI
 └── tsconfig.json     # TypeScript settings
@@ -78,4 +57,4 @@ the tempo increases.
 
 - Add sound design and haptic feedback for pickups and collisions.
 - Introduce daily modifier runs with unique elemental rule sets.
-- Persist high scores using a native keychain/Keystore wrapper or cloud sync.
+- Persist high scores using Expo SecureStore or cloud sync.
