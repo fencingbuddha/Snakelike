@@ -9,7 +9,7 @@ import SwiftUI
 
 struct GameView: View {
     @StateObject private var viewModel = SnakeGameViewModel()
-    @State private var containerSize: CGSize = .zero
+    var onExit: () -> Void = {}
 
     private let gradient = LinearGradient(
         gradient: Gradient(colors: [Color(hex: "#060913") ?? .black, Color(hex: "#0d1324") ?? .black]),
@@ -18,22 +18,34 @@ struct GameView: View {
     )
 
     var body: some View {
-        ZStack {
-            gradient.ignoresSafeArea()
+        GeometryReader { geometry in
+            ZStack(alignment: .topTrailing) {
+                gradient.ignoresSafeArea()
 
-            VStack(spacing: 16) {
-                header
-                harmonyMeter
-                board
-                footer
+                VStack(spacing: 20) {
+                    header
+                    harmonyMeter
+                    board
+                        .frame(maxWidth: .infinity)
+                        .layoutPriority(1)
+                    footer
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, max(geometry.safeAreaInsets.bottom, 20))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+                exitButton
+                    .padding(.trailing, 24)
+                    .padding(.top, 24)
             }
-            .padding(24)
-        }
-        .onAppear {
-            viewModel.startGameLoop()
-        }
-        .onDisappear {
-            viewModel.stopGameLoop()
+            .onAppear {
+                viewModel.startGameLoop()
+            }
+            .onDisappear {
+                viewModel.stopGameLoop()
+            }
         }
     }
 
@@ -117,8 +129,8 @@ struct GameView: View {
 
     private var board: some View {
         GeometryReader { geometry in
-            let size = min(geometry.size.width, geometry.size.height)
-            let cellSize = size / CGFloat(GameConfig.gridSize)
+            let boardSize = min(geometry.size.width, geometry.size.height)
+            let cellSize = boardSize / CGFloat(GameConfig.gridSize)
 
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: 24)
@@ -151,12 +163,10 @@ struct GameView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 20))
                 .padding(12)
             }
-            .frame(width: size, height: size)
-            .onAppear {
-                containerSize = geometry.size
-            }
+            .frame(width: boardSize, height: boardSize)
             .gesture(dragGesture)
             .overlay(gameOverOverlay)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
         .aspectRatio(1, contentMode: .fit)
     }
@@ -228,7 +238,7 @@ struct GameView: View {
                     .padding()
                 }
             }
-        }
+            }
     }
 
     private var dragGesture: some Gesture {
@@ -249,6 +259,16 @@ struct GameView: View {
                     }
                 }
             }
+    }
+
+    private var exitButton: some View {
+        Button(action: onExit) {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 32, weight: .bold))
+                .foregroundStyle(Color.white.opacity(0.9), Color.white.opacity(0.2))
+                .shadow(radius: 8, y: 4)
+        }
+        .accessibilityLabel("Exit Game")
     }
 }
 

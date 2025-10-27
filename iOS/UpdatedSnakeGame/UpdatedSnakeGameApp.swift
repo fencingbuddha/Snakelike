@@ -11,7 +11,7 @@ import SwiftUI
 struct UpdatedSnakeGameApp: App {
     var body: some Scene {
         WindowGroup {
-            GameView()
+            RootView()
         }
     }
 }

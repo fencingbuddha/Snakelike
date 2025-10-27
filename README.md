@@ -12,6 +12,7 @@ Native SwiftUI rewrite of the Chromatic Current snake adventure. The project is 
 1. Open `iOS/UpdatedSnakeGame.xcodeproj` in Xcode.
 2. Select the `UpdatedSnakeGame` scheme and an iOS simulator or a connected device.
 3. Build & run (`⌘R`) to launch the game.
+4. Tap the `X` in the upper-right corner to return to the main menu at any time.
 
 ## Running Tests
 
@@ -35,5 +36,6 @@ The `UpdatedSnakeGame` engine lives under `iOS/UpdatedSnakeGame/Engine` and can 
 - Harmony increases the snake's speed; mixing different blooms keeps the flow going.
 - Elemental blooms grant unique bonuses (growth, phase turns, harmony refill).
 - Phase turns let the snake slip through itself for a limited number of moves.
+- A full-screen board keeps the action front and center; use the exit button any time to re-enter the chromatic calm of the menu.
 
 Enjoy weaving your chromatic current natively in Xcode!

@@ -1,8 +1,9 @@
 // !$*UTF8*$!
 {
 	archiveVersion = 1;
-	classes = {};
-	objectVersion = 55;
+	classes = {
+	};
+	objectVersion = 56;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -13,8 +14,10 @@
 		A600002A1E8D12340000002B /* Direction.swift in Sources */ = {isa = PBXBuildFile; fileRef = A600001B1E8D12340000001C /* Direction.swift */; };
 		A600002B1E8D12340000002C /* Grid.swift in Sources */ = {isa = PBXBuildFile; fileRef = A600001C1E8D12340000001D /* Grid.swift */; };
 		A600002C1E8D12340000002D /* FoodType.swift in Sources */ = {isa = PBXBuildFile; fileRef = A600001D1E8D12340000001E /* FoodType.swift */; };
-        A600002D1E8D12340000002E /* SnakeGameEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A600001E1E8D12340000001F /* SnakeGameEngine.swift */; };
+		A600002D1E8D12340000002E /* SnakeGameEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A600001E1E8D12340000001F /* SnakeGameEngine.swift */; };
 		A600002E1E8D12340000002F /* SnakeGameViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A600001F1E8D123400000020 /* SnakeGameViewModel.swift */; };
+		A60000361E8D123400000037 /* MainMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000341E8D123400000035 /* MainMenuView.swift */; };
+		A60000371E8D123400000038 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000351E8D123400000036 /* RootView.swift */; };
 		A600002F1E8D123400000030 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A60000211E8D123400000022 /* Assets.xcassets */; };
 		A60000301E8D123400000031 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A60000221E8D123400000023 /* Preview Assets.xcassets */; };
 		A60000311E8D123400000032 /* UpdatedSnakeGameTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000231E8D123400000024 /* UpdatedSnakeGameTests.swift */; };
@@ -40,6 +43,8 @@
 		A600001D1E8D12340000001E /* FoodType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodType.swift; sourceTree = "<group>"; };
 		A600001E1E8D12340000001F /* SnakeGameEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnakeGameEngine.swift; sourceTree = "<group>"; };
 		A600001F1E8D123400000020 /* SnakeGameViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnakeGameViewModel.swift; sourceTree = "<group>"; };
+		A60000341E8D123400000035 /* MainMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuView.swift; sourceTree = "<group>"; };
+		A60000351E8D123400000036 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		A60000201E8D123400000021 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A60000211E8D123400000022 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A60000221E8D123400000023 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
@@ -89,6 +94,8 @@
 			children = (
 				A60000171E8D123400000018 /* UpdatedSnakeGameApp.swift */,
 				A60000181E8D123400000019 /* GameView.swift */,
+				A60000351E8D123400000036 /* RootView.swift */,
+				A60000341E8D123400000035 /* MainMenuView.swift */,
 				A60000191E8D12340000001A /* Color+Hex.swift */,
 				A60000041E8D123400000005 /* Engine */,
 				A60000211E8D123400000022 /* Assets.xcassets */,
@@ -226,7 +233,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A60000371E8D123400000038 /* RootView.swift in Sources */,
 				A600002E1E8D12340000002F /* SnakeGameViewModel.swift in Sources */,
+				A60000361E8D123400000037 /* MainMenuView.swift in Sources */,
 				A600002C1E8D12340000002D /* FoodType.swift in Sources */,
 				A60000291E8D12340000002A /* GameConfig.swift in Sources */,
 				A600002A1E8D12340000002B /* Direction.swift in Sources */,
@@ -290,7 +299,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"UpdatedSnakeGame/Preview Content\"";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = Q856QWH3Q4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = UpdatedSnakeGame/Info.plist;
@@ -315,7 +324,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"UpdatedSnakeGame/Preview Content\"";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = Q856QWH3Q4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = UpdatedSnakeGame/Info.plist;
@@ -335,6 +344,7 @@
 		A60000151E8D123400000016 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
@@ -344,7 +354,6 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.UpdatedSnakeGameTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
@@ -358,6 +367,7 @@
 		A60000161E8D123400000017 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
@@ -367,7 +377,6 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.UpdatedSnakeGameTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
