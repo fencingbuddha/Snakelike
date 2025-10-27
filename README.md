@@ -1,60 +1,39 @@
-# Snakelike
+# Updated Snake Game (SwiftUI)
 
-Chromatic Current is a cross-platform mobile twist on the classic snake formula built with Expo
-and React Native. Glide through a neon grid while collecting elemental blooms to keep your
-harmony meter charged. Mixing colors grants speed and scoring bonuses, while repeating the same
-energy destabilises the run. Stack phase turns to slip through your own body and outmaneuver the
-board as the tempo increases.
+Native SwiftUI rewrite of the Chromatic Current snake adventure. The project is ready to run and test entirely inside Xcode, with a pure Swift game engine that mirrors the original gameplay systems.
 
-## Getting started
+## Requirements
 
-1. **Install dependencies**
-   ```bash
-   npm install
-   ```
+- Xcode 15 or newer (tested with iOS 16+ simulators)
+- macOS Ventura or newer recommended
 
-2. **Run the development server**
-   ```bash
-   npm run start
-   ```
-   Use the Expo CLI output to launch the app on iOS Simulator, Android Emulator, or an Expo Go
-   device.
+## Getting Started
 
-3. **Optional platform shortcuts**
-   ```bash
-   npm run ios
-   npm run android
-   npm run web
-   ```
+1. Open `iOS/UpdatedSnakeGame.xcodeproj` in Xcode.
+2. Select the `UpdatedSnakeGame` scheme and an iOS simulator or a connected device.
+3. Build & run (`⌘R`) to launch the game.
 
-## Gameplay overview
+## Running Tests
 
-- **Harmony meter** – Eating different colors back-to-back fills the meter, rewarding higher
-  scores and faster ticks. Repeating a color drains harmony; lose it all and the board speed will
-  stagnate, making survival tougher.
-- **Elemental blooms** – Each pickup carries a unique perk:
-  - *Ember Bloom* supercharges growth but harshly penalises repeats.
-  - *Tidal Pearl* grants phase turns, letting you pass safely through yourself for a limited time.
-  - *Gale Petal* offers steady scoring without destabilising harmony.
-  - *Prism Core* is rare, instantly refilling harmony and gifting an extended phasing window.
-- **Swipe controls** – Swipe across the board to set the next direction. Opposite turns are
-  prevented to avoid instant collisions.
-- **Restart quickly** – On a harmony collapse, tap **Restart Run** to jump straight back in.
+Unit tests cover the snake engine, food system, harmony rules, and collision logic.
 
-## Project structure
-
-```
-.
-├── App.tsx           # App entry point
-├── app.json          # Expo configuration
-├── package.json      # Dependencies and scripts
-├── src/
-│   └── Game.tsx      # Core game loop and UI
-└── tsconfig.json     # TypeScript settings
+```bash
+# From Xcode: Product ▸ Test (⌘U)
 ```
 
-## Next steps
+The `UpdatedSnakeGame` engine lives under `iOS/UpdatedSnakeGame/Engine` and can be tested independently from the SwiftUI interface.
 
-- Add sound design and haptic feedback for pickups and collisions.
-- Introduce daily modifier runs with unique elemental rule sets.
-- Persist high scores using Expo SecureStore or cloud sync.
+## Project Structure
+
+- `iOS/UpdatedSnakeGame.xcodeproj` – Xcode project configured with app and test targets.
+- `iOS/UpdatedSnakeGame` – SwiftUI app sources, assets, and Info.plist.
+- `iOS/UpdatedSnakeGame/Engine` – Pure Swift gameplay logic for easier testing.
+- `iOS/UpdatedSnakeGameTests` – XCTest bundle with deterministic engine checks.
+
+## Gameplay Notes
+
+- Harmony increases the snake's speed; mixing different blooms keeps the flow going.
+- Elemental blooms grant unique bonuses (growth, phase turns, harmony refill).
+- Phase turns let the snake slip through itself for a limited number of moves.
+
+Enjoy weaving your chromatic current natively in Xcode!
