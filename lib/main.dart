@@ -15,6 +15,7 @@ import 'model/theme_skin.dart';
 import 'services/profile_manager.dart';
 import 'services/leaderboard_service.dart';
 import 'services/replay_recorder.dart';
+import 'services/audio_manager.dart';
 
 final CloudSyncService _cloudSyncService = StubCloudSyncService();
 
@@ -277,6 +278,7 @@ class _GameScreenState extends State<GameScreen>
   bool _isPaused = false;
   final ReplayRecorder _replayRecorder = ReplayRecorder();
   late DateTime _runStart;
+  AudioManager? _audioManager;
 
   bool get _practiceMode => widget.practiceMode;
 
@@ -287,6 +289,10 @@ class _GameScreenState extends State<GameScreen>
     final missionSet = MissionGenerator.generate(DateTime.now());
     _dailyMissions = missionSet.daily;
     _weeklyMissions = missionSet.weekly;
+    AudioManager.load().then((manager) {
+      _audioManager = manager;
+      manager.playAmbient(DateTime.now());
+    });
     _shakeController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 420),
@@ -318,6 +324,7 @@ class _GameScreenState extends State<GameScreen>
   void dispose() {
     _shakeController.dispose();
     _flashController.dispose();
+    _audioManager?.dispose();
     _ticker.dispose();
     super.dispose();
   }
@@ -421,6 +428,13 @@ class _GameScreenState extends State<GameScreen>
     final currentState = engine.state;
     final missionsChanged =
         _updateMissionProgress(previousState, currentState);
+
+    if (_audioManager != null) {
+      _audioManager!.updateHarmonyLayers(
+        currentState.harmony,
+        GameConfig.maxHarmony,
+      );
+    }
 
     if (!previousState.isGameOver && currentState.isGameOver) {
       _replayRecorder.stop();
