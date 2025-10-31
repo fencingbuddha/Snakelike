@@ -1,21 +1,19 @@
-# Xcode build artifacts
-DerivedData/
-build/
-
-# Xcode user data
-*.xccheckout
-*.xcscmblueprint
-*.xcuserstate
-xcuserdata/
-
-# Swift Package Manager
-.build/
-.swiftpm/
-Package.resolved
-
-# macOS
+# Misc
 .DS_Store
-
-# Tooling
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
 .idea/
 .vscode/
+
+# Flutter build
+/build/
+/ios/Flutter/flutter_export_environment.sh
+/ios/Flutter/Generated.xcconfig
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Generated files
+pubspec.lock
