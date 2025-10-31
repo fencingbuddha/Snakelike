@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -10,30 +11,43 @@ import 'engine/game_config.dart';
 import 'engine/grid.dart';
 import 'engine/snake_game_engine.dart';
 import 'engine/missions.dart';
+import 'model/theme_skin.dart';
+import 'services/profile_manager.dart';
+import 'services/leaderboard_service.dart';
+import 'services/replay_recorder.dart';
 
-void main() {
-  runApp(const ChromaticCurrentApp());
+final CloudSyncService _cloudSyncService = StubCloudSyncService();
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final profileManager = await ProfileManager.load();
+  runApp(
+    ProfileScope(
+      notifier: profileManager,
+      child: ChromaticCurrentApp(profileManager: profileManager),
+    ),
+  );
 }
 
 class ChromaticCurrentApp extends StatelessWidget {
-  const ChromaticCurrentApp({super.key});
+  const ChromaticCurrentApp({super.key, required this.profileManager});
+
+  final ProfileManager profileManager;
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Chromatic Current',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        fontFamily: 'SF Pro Display',
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xff61dbff),
-          secondary: Color(0xff32e0c4),
-        ),
-        scaffoldBackgroundColor: const Color(0xff060913),
-        useMaterial3: true,
-      ),
-      home: const RootScreen(),
+    return AnimatedBuilder(
+      animation: profileManager,
+      builder: (context, _) {
+        final palette = profileManager.activeTheme.palette;
+        final theme = palette.toThemeData();
+        return MaterialApp(
+          title: 'Chromatic Current',
+          debugShowCheckedModeBanner: false,
+          theme: theme,
+          home: const RootScreen(),
+        );
+      },
     );
   }
 }
@@ -47,6 +61,7 @@ class RootScreen extends StatefulWidget {
 
 class _RootScreenState extends State<RootScreen> {
   bool _isPlaying = false;
+  bool _practiceMode = false;
 
   @override
   Widget build(BuildContext context) {
@@ -55,6 +70,7 @@ class _RootScreenState extends State<RootScreen> {
       child: _isPlaying
           ? GameScreen(
               key: const ValueKey('game'),
+              practiceMode: _practiceMode,
               onExit: () {
                 setState(() {
                   _isPlaying = false;
@@ -65,6 +81,13 @@ class _RootScreenState extends State<RootScreen> {
               key: const ValueKey('menu'),
               onStart: () {
                 setState(() {
+                  _practiceMode = false;
+                  _isPlaying = true;
+                });
+              },
+              onPractice: () {
+                setState(() {
+                  _practiceMode = true;
                   _isPlaying = true;
                 });
               },
@@ -73,68 +96,145 @@ class _RootScreenState extends State<RootScreen> {
   }
 }
 
-class MainMenuScreen extends StatelessWidget {
-  const MainMenuScreen({super.key, required this.onStart});
+class MainMenuScreen extends StatefulWidget {
+  const MainMenuScreen({
+    super.key,
+    required this.onStart,
+    required this.onPractice,
+  });
 
   final VoidCallback onStart;
+  final VoidCallback onPractice;
 
-  LinearGradient get _gradient => const LinearGradient(
-        colors: [Color(0xff060913), Color(0xff0d1324)],
+  @override
+  State<MainMenuScreen> createState() => _MainMenuScreenState();
+}
+
+class _MainMenuScreenState extends State<MainMenuScreen> {
+  bool _showOnboarding = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final profile = ProfileScope.of(context).profile;
+    if (!profile.onboardingSeen) {
+      _showOnboarding = true;
+    }
+  }
+
+  LinearGradient _gradientForPalette(ThemePalette palette) => LinearGradient(
+        colors: [palette.background, palette.surface],
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
       );
 
   @override
   Widget build(BuildContext context) {
+    final profileManager = ProfileScope.of(context);
+    final palette = profileManager.activeTheme.palette;
+    final profile = profileManager.profile;
+    final theme = Theme.of(context);
+
     return DecoratedBox(
-      decoration: BoxDecoration(gradient: _gradient),
+      decoration: BoxDecoration(gradient: _gradientForPalette(palette)),
       child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const SizedBox(height: 48),
-              const Text(
-                'Chromatic Current',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 36,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Ride the elemental wave and keep your harmony flowing.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                  color: Color(0xff8f9bb5),
-                ),
-              ),
-              const SizedBox(height: 40),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xff61dbff),
-                  foregroundColor: const Color(0xff05070f),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 48, vertical: 16),
-                  shape: const StadiumBorder(),
-                  textStyle: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: IntrinsicHeight(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      const SizedBox(height: 48),
+                      const Text(
+                        'Chromatic Current',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 36,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Ride the elemental wave and keep your harmony flowing.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xff8f9bb5),
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        alignment: WrapAlignment.center,
+                        children: [
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: palette.primary,
+                              foregroundColor: const Color(0xff05070f),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 42,
+                                vertical: 16,
+                              ),
+                              shape: const StadiumBorder(),
+                              textStyle: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            onPressed: widget.onStart,
+                            child: const Text('Start Run'),
+                          ),
+                          OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              side: BorderSide(color: palette.secondary),
+                              foregroundColor: palette.secondary,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 42,
+                                vertical: 16,
+                              ),
+                              shape: const StadiumBorder(),
+                              textStyle: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            onPressed: widget.onPractice,
+                            child: const Text('Practice Mode'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 32),
+                      _ThemeSelector(
+                        profile: profile,
+                        onSelect: profileManager.selectTheme,
+                      ),
+                      const SizedBox(height: 32),
+                      _LeaderboardButton(),
+                      const SizedBox(height: 32),
+                      const _LegendPanel(),
+                      const Spacer(),
+                      if (_showOnboarding)
+                        _OnboardingTip(
+                          onDismiss: () {
+                            ProfileScope.of(context).markOnboardingSeen();
+                            setState(() {
+                              _showOnboarding = false;
+                            });
+                          },
+                        ),
+                    ],
                   ),
                 ),
-                onPressed: onStart,
-                child: const Text('Start Run'),
               ),
-              const SizedBox(height: 48),
-              const _LegendPanel(),
-              const Spacer(),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
@@ -142,9 +242,14 @@ class MainMenuScreen extends StatelessWidget {
 }
 
 class GameScreen extends StatefulWidget {
-  const GameScreen({super.key, required this.onExit});
+  const GameScreen({
+    super.key,
+    required this.onExit,
+    required this.practiceMode,
+  });
 
   final VoidCallback onExit;
+  final bool practiceMode;
 
   @override
   State<GameScreen> createState() => _GameScreenState();
@@ -170,6 +275,10 @@ class _GameScreenState extends State<GameScreen>
   late List<Mission> _weeklyMissions;
   bool _missionsExpanded = false;
   bool _isPaused = false;
+  final ReplayRecorder _replayRecorder = ReplayRecorder();
+  late DateTime _runStart;
+
+  bool get _practiceMode => widget.practiceMode;
 
   @override
   void initState() {
@@ -202,6 +311,7 @@ class _GameScreenState extends State<GameScreen>
         }
       });
     _flashController.value = 1;
+    _runStart = DateTime.now();
   }
 
   @override
@@ -240,6 +350,10 @@ class _GameScreenState extends State<GameScreen>
       _shakeController.value = 0;
       _flashController.stop();
       _flashController.value = 1;
+      _replayRecorder.start();
+      _runStart = DateTime.now();
+      _missionsExpanded = false;
+      _isPaused = false;
     }
   }
 
@@ -290,6 +404,7 @@ class _GameScreenState extends State<GameScreen>
       _tickAccumulator -= interval;
       engine.advance();
       didAdvance = true;
+      _replayRecorder.capture(engine.state);
       final afterState = engine.state;
       if (afterState.score > beforeScore) {
         consumedFood = true;
@@ -306,6 +421,27 @@ class _GameScreenState extends State<GameScreen>
     final currentState = engine.state;
     final missionsChanged =
         _updateMissionProgress(previousState, currentState);
+
+    if (!previousState.isGameOver && currentState.isGameOver) {
+      _replayRecorder.stop();
+      final durationSeconds =
+          DateTime.now().difference(_runStart).inSeconds;
+      final profileManager = ProfileScope.of(context);
+      profileManager.recordRun(
+        score: currentState.score,
+        durationSeconds: durationSeconds,
+        practiceMode: _practiceMode,
+      );
+      unawaited(_cloudSyncService.syncProfile(profileManager.profile));
+      if (!widget.practiceMode) {
+        unawaited(
+          _cloudSyncService.syncLeaderboard(
+            'season_2025',
+            profileManager.profile.leaderboard,
+          ),
+        );
+      }
+    }
 
     final direction = engine.state.direction;
     final directionOffset = engine.state.isGameOver
@@ -358,6 +494,8 @@ class _GameScreenState extends State<GameScreen>
     _flashController.stop();
     _flashController.value = 1;
     _isPaused = false;
+    _replayRecorder.start();
+    _runStart = DateTime.now();
     setState(() {});
   }
 
@@ -423,6 +561,26 @@ class _GameScreenState extends State<GameScreen>
     });
   }
 
+  void _quitToMenu() {
+    _replayRecorder.stop();
+    widget.onExit();
+  }
+
+  Future<void> _shareReplay() async {
+    if (!_replayRecorder.hasFrames) {
+      return;
+    }
+    final export = _replayRecorder.exportJson();
+    await Clipboard.setData(ClipboardData(text: export));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Replay copied to clipboard as JSON.'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
   bool _updateMissionProgress(
     SnakeGameState previous,
     SnakeGameState current,
@@ -460,11 +618,17 @@ class _GameScreenState extends State<GameScreen>
       return mission;
     }
 
+    final profileManager = ProfileScope.of(context);
+    final wasComplete = mission.isComplete;
     switch (mission.kind) {
       case MissionKind.collectFoodType:
         if (current.consumedThisTick != null &&
             current.consumedThisTick == mission.foodType) {
-          return mission.addProgress(1);
+          final updated = mission.addProgress(1);
+          if (!wasComplete && updated.isComplete) {
+            profileManager.recordMissionCompletion(mission.id);
+          }
+          return updated;
         }
         break;
       case MissionKind.reachPhase:
@@ -472,54 +636,64 @@ class _GameScreenState extends State<GameScreen>
             .clamp(0, GameConfig.maxPhaseTurns)
             .toInt();
         if (currentPhase >= mission.target) {
-          return mission.copyWith(progress: mission.target);
+          final updated = mission.copyWith(progress: mission.target);
+          if (!wasComplete && updated.isComplete) {
+            profileManager.recordMissionCompletion(mission.id);
+          }
+          return updated;
         }
         break;
       case MissionKind.scorePoints:
         final delta = max(0, current.score - previous.score);
         if (delta > 0) {
-          return mission.addProgress(delta);
+          final updated = mission.addProgress(delta);
+          if (!wasComplete && updated.isComplete) {
+            profileManager.recordMissionCompletion(mission.id);
+          }
+          return updated;
         }
         break;
     }
     return mission;
   }
 
-  LinearGradient get _gradient => const LinearGradient(
-        colors: [Color(0xff060913), Color(0xff0d1324)],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      );
-
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(gradient: _gradient),
-      child: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            _ensureEngine(constraints);
-            final engine = _engine;
-            if (engine == null) {
-              return const SizedBox.shrink();
-            }
-            final state = engine.state;
-            final shakeProgress = _shakeController.value.clamp(0.0, 1.0);
-            final easedShake = Curves.easeOutQuad.transform(shakeProgress);
-            final shakeDamp = (1 - easedShake) * (1 - easedShake);
-            final shakeOffset = Offset(
-              sin(shakeProgress * pi * 12) * 18 * shakeDamp,
-              sin(shakeProgress * pi * 9 + pi / 2) * 12 * shakeDamp,
-            );
-            double flashOpacity = 0;
-            if (_flashController.isAnimating || _flashController.value < 1) {
-              final t = _flashController.value.clamp(0.0, 1.0);
-              flashOpacity = 1 - Curves.easeOutQuad.transform(t);
-            }
-            final flashColor = state.lastFood != null
-                ? Color(state.lastFood!.colorHex)
-                : const Color(0xff8de7ff);
-            return Stack(
+    final palette = ProfileScope.of(context).activeTheme.palette;
+    final gradient = LinearGradient(
+      colors: [palette.background, palette.surface],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    );
+
+    return Scaffold(
+      body: DecoratedBox(
+        decoration: BoxDecoration(gradient: gradient),
+        child: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              _ensureEngine(constraints);
+              final engine = _engine;
+              if (engine == null) {
+                return const SizedBox.shrink();
+              }
+              final state = engine.state;
+              final shakeProgress = _shakeController.value.clamp(0.0, 1.0);
+              final easedShake = Curves.easeOutQuad.transform(shakeProgress);
+              final shakeDamp = (1 - easedShake) * (1 - easedShake);
+              final shakeOffset = Offset(
+                sin(shakeProgress * pi * 12) * 18 * shakeDamp,
+                sin(shakeProgress * pi * 9 + pi / 2) * 12 * shakeDamp,
+              );
+              double flashOpacity = 0;
+              if (_flashController.isAnimating || _flashController.value < 1) {
+                final t = _flashController.value.clamp(0.0, 1.0);
+                flashOpacity = 1 - Curves.easeOutQuad.transform(t);
+              }
+              final flashColor = state.lastFood != null
+                  ? Color(state.lastFood!.colorHex)
+                  : const Color(0xff8de7ff);
+              return Stack(
               children: [
                 Positioned.fill(
                   child: _ParallaxBackground(
@@ -539,6 +713,14 @@ class _GameScreenState extends State<GameScreen>
                       onPanStart: _handlePanStart,
                       onPanUpdate: _handlePanUpdate,
                       onPanEnd: _handlePanEnd,
+                      onQuickPause: () {
+                        if (!_isPaused) {
+                          setState(() {
+                            _isPaused = true;
+                          });
+                          _triggerHaptic(_HapticIntensity.light);
+                        }
+                      },
                     ),
                   ),
                 ),
@@ -552,6 +734,22 @@ class _GameScreenState extends State<GameScreen>
                     left: 24,
                     bottom: 24,
                     child: _MissionSummaryButton(onTap: _toggleMissions),
+                  ),
+                if (_missionsExpanded && !_isPaused && !state.isGameOver)
+                  Positioned(
+                    left: 24,
+                    bottom: 96,
+                    child: _MissionOverlay(
+                      daily: _dailyMissions,
+                      weekly: _weeklyMissions,
+                      onClose: _toggleMissions,
+                    ),
+                  ),
+                if (widget.practiceMode)
+                  Positioned(
+                    top: 24,
+                    right: 72,
+                    child: const _PracticeBadge(),
                   ),
                 if (engine.isCooperative)
                   Positioned(
@@ -599,23 +797,26 @@ class _GameScreenState extends State<GameScreen>
                         });
                       },
                       onRestart: _restart,
-                      onExit: widget.onExit,
+                      onExit: _quitToMenu,
                       onViewMissions: _toggleMissions,
                       missionsExpanded: _missionsExpanded,
                       dailyMissions: _dailyMissions,
                       weeklyMissions: _weeklyMissions,
+                      onShareReplay: _shareReplay,
+                      hasReplay: _replayRecorder.hasFrames,
                     ),
                   ),
                 if (state.isGameOver)
                   Positioned.fill(
                     child: _GameOverOverlay(
                       onRestart: _restart,
-                      onExit: widget.onExit,
+                      onExit: _quitToMenu,
                     ),
                   ),
               ],
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -632,6 +833,7 @@ class _GameBoard extends StatelessWidget {
     required this.onPanStart,
     required this.onPanUpdate,
     required this.onPanEnd,
+    required this.onQuickPause,
   });
 
   final SnakeGameState state;
@@ -642,6 +844,7 @@ class _GameBoard extends StatelessWidget {
   final GestureDragStartCallback onPanStart;
   final GestureDragUpdateCallback onPanUpdate;
   final GestureDragEndCallback onPanEnd;
+  final VoidCallback onQuickPause;
 
   @override
   Widget build(BuildContext context) {
@@ -649,6 +852,7 @@ class _GameBoard extends StatelessWidget {
       onPanStart: onPanStart,
       onPanUpdate: onPanUpdate,
       onPanEnd: onPanEnd,
+      onDoubleTap: onQuickPause,
       child: DecoratedBox(
         decoration: const BoxDecoration(
           color: Color(0xff05070f),
@@ -1485,6 +1689,16 @@ class _GameOverOverlay extends StatelessWidget {
               onPressed: onRestart,
               child: const Text('Restart Run'),
             ),
+            const SizedBox(height: 12),
+            TextButton.icon(
+              onPressed: onExit,
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white70,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              ),
+              icon: const Icon(Icons.close_rounded),
+              label: const Text('Quit To Menu'),
+            ),
           ],
         ),
       ),
@@ -1501,6 +1715,8 @@ class _PauseOverlay extends StatelessWidget {
     required this.missionsExpanded,
     required this.dailyMissions,
     required this.weeklyMissions,
+    required this.onShareReplay,
+    required this.hasReplay,
   });
 
   final VoidCallback onResume;
@@ -1510,6 +1726,8 @@ class _PauseOverlay extends StatelessWidget {
   final bool missionsExpanded;
   final List<Mission> dailyMissions;
   final List<Mission> weeklyMissions;
+  final VoidCallback onShareReplay;
+  final bool hasReplay;
 
   @override
   Widget build(BuildContext context) {
@@ -1576,6 +1794,24 @@ class _PauseOverlay extends StatelessWidget {
               icon: const Icon(Icons.close_rounded),
               label: const Text('Quit To Menu'),
             ),
+            const SizedBox(height: 10),
+            if (hasReplay)
+              OutlinedButton.icon(
+                onPressed: onShareReplay,
+                icon: const Icon(Icons.ios_share_rounded),
+                label: const Text('Share Last Run'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Color(0xff61dbff)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 22,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                ),
+              ),
             const SizedBox(height: 16),
             if (missionsExpanded)
               ConstrainedBox(
@@ -1629,6 +1865,381 @@ class _PauseButton extends StatelessWidget {
       ),
       color: Colors.white.withOpacity(0.9),
       onPressed: onTap,
+    );
+  }
+}
+
+class _PracticeBadge extends StatelessWidget {
+  const _PracticeBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Text(
+          'Practice Mode',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+            letterSpacing: 0.6,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ThemeSelector extends StatelessWidget {
+  const _ThemeSelector({required this.profile, required this.onSelect});
+
+  final PlayerProfile profile;
+  final void Function(String themeId) onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Themes & Skins',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            for (final skin in builtInThemes)
+              _ThemeTile(
+                skin: skin,
+                unlocked: profile.unlockedThemes.contains(skin.id),
+                active: profile.activeThemeId == skin.id,
+                onTap: () => onSelect(skin.id),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _ThemeTile extends StatelessWidget {
+  const _ThemeTile({
+    required this.skin,
+    required this.unlocked,
+    required this.active,
+    required this.onTap,
+  });
+
+  final ThemeSkin skin;
+  final bool unlocked;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = skin.palette;
+    final borderColor = active
+        ? palette.primary
+        : unlocked
+            ? palette.secondary.withOpacity(0.6)
+            : Colors.white12;
+    return GestureDetector(
+      onTap: unlocked ? onTap : null,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 200),
+        opacity: unlocked ? 1 : 0.45,
+        child: Container(
+          width: 110,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: borderColor, width: 2),
+            gradient: LinearGradient(
+              colors: [
+                palette.background.withOpacity(0.8),
+                palette.surface.withOpacity(0.8),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                skin.name,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                height: 6,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(6),
+                  gradient: LinearGradient(
+                    colors: [palette.primary, palette.secondary],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                skin.description ?? '',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.white.withOpacity(0.7),
+                ),
+              ),
+              if (!unlocked)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(
+                    children: const [
+                      Icon(Icons.lock_outline, size: 12, color: Colors.white54),
+                      SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          'Locked',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.white54,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              if (!unlocked && skin.unlockType != ThemeUnlockType.builtIn)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    _requirementText(skin),
+                    style: const TextStyle(
+                      fontSize: 9,
+                      color: Colors.white54,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _requirementText(ThemeSkin skin) {
+    switch (skin.unlockType) {
+      case ThemeUnlockType.score:
+        return 'Score ${skin.unlockValue} in a run';
+      case ThemeUnlockType.mission:
+        return 'Complete mission ${skin.unlockValue}';
+      case ThemeUnlockType.builtIn:
+        return 'Unlocked';
+    }
+  }
+}
+
+class _LeaderboardButton extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      icon: const Icon(Icons.leaderboard_outlined, size: 18),
+      style: OutlinedButton.styleFrom(
+        side: const BorderSide(color: Color(0xff61dbff)),
+        foregroundColor: const Color(0xff61dbff),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      ),
+      onPressed: () {
+        final profile = ProfileScope.of(context).profile;
+        showModalBottomSheet<void>(
+          context: context,
+          backgroundColor: const Color(0xff0d1324),
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          builder: (context) => _LeaderboardSheet(entries: profile.leaderboard),
+        );
+      },
+      label: const Text('Leaderboards'),
+    );
+  }
+}
+
+class _LeaderboardSheet extends StatelessWidget {
+  const _LeaderboardSheet({required this.entries});
+
+  final List<LeaderboardEntry> entries;
+
+  @override
+  Widget build(BuildContext context) {
+    final groups = <String, List<LeaderboardEntry>>{};
+    for (final entry in entries) {
+      groups.putIfAbsent(entry.seasonId, () => []).add(entry);
+    }
+    final seasons = groups.keys.toList()..sort();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 36),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Seasonal Ladder',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (entries.isEmpty)
+              const Text(
+                'No runs recorded yet. Chase a high score to make the board!',
+                style: TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+            for (final season in seasons)
+              _LeaderboardSeasonSection(
+                title: season,
+                entries: groups[season]!..sort((a, b) => b.score.compareTo(a.score)),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LeaderboardSeasonSection extends StatelessWidget {
+  const _LeaderboardSeasonSection({
+    required this.title,
+    required this.entries,
+  });
+
+  final String title;
+  final List<LeaderboardEntry> entries;
+
+  String _formatDate(DateTime dt) {
+    final month = dt.month.toString().padLeft(2, '0');
+    final day = dt.day.toString().padLeft(2, '0');
+    final year = dt.year.toString().substring(2);
+    return '$month/$day/$year';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 14,
+              color: Color(0xff7dd3fc),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ...entries.asMap().entries.map(
+            (entry) {
+              final index = entry.key + 1;
+              final record = entry.value;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '#$index',
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                    Text(
+                      record.score.toString(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      _formatDate(record.timestamp),
+                      style:
+                          const TextStyle(color: Colors.white54, fontSize: 11),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OnboardingTip extends StatelessWidget {
+  const _OnboardingTip({required this.onDismiss});
+
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Pro Tip',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Swipe to steer, pinch with two fingers to pause, and rotate themes as you unlock them. Practice mode is great for testing new skins!',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 12,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: onDismiss,
+                style: TextButton.styleFrom(foregroundColor: Colors.white70),
+                child: const Text('Got it'),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
