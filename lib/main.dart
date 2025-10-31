@@ -1,6 +1,7 @@
-import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import 'engine/direction.dart';
 import 'engine/food.dart';
@@ -116,7 +117,8 @@ class MainMenuScreen extends StatelessWidget {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xff61dbff),
                   foregroundColor: const Color(0xff05070f),
-                  padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 16),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 48, vertical: 16),
                   shape: const StadiumBorder(),
                   textStyle: const TextStyle(
                     fontSize: 18,
@@ -146,60 +148,136 @@ class GameScreen extends StatefulWidget {
   State<GameScreen> createState() => _GameScreenState();
 }
 
-class _GameScreenState extends State<GameScreen> {
-  late SnakeGameEngine _engine;
-  Timer? _timer;
+class _GameScreenState extends State<GameScreen>
+    with SingleTickerProviderStateMixin {
+  SnakeGameEngine? _engine;
+  late final Ticker _ticker;
+  Duration? _lastTickTimestamp;
+  Duration _tickAccumulator = Duration.zero;
+  Offset _panDelta = Offset.zero;
+  bool _panDirectionCommitted = false;
 
   @override
   void initState() {
     super.initState();
-    _engine = SnakeGameEngine.standard();
-    _scheduleTick();
+    _ticker = createTicker(_handleTick)..start();
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _ticker.dispose();
     super.dispose();
   }
 
-  void _scheduleTick() {
-    _timer?.cancel();
-    if (_engine.state.isGameOver) {
+  void _ensureEngine(BoxConstraints constraints) {
+    final maxWidth = constraints.maxWidth;
+    final maxHeight = constraints.maxHeight;
+    if (maxWidth <= 0 || maxHeight <= 0) {
       return;
     }
-    _timer = Timer(_engine.state.tickInterval, () {
-      _engine.advance();
-      if (mounted) {
-        setState(() {});
-        _scheduleTick();
+
+    final gridWidth = GameConfig.gridWidth;
+    final cellSizeByWidth = maxWidth / gridWidth;
+    final possibleRows = maxHeight > 0
+        ? (maxHeight / cellSizeByWidth).floor()
+        : GameConfig.minGridHeight;
+    final targetHeight = max(GameConfig.minGridHeight, possibleRows);
+
+    if (_engine == null || _engine!.gridHeight != targetHeight) {
+      _engine = SnakeGameEngine.standard(
+        gridWidth: gridWidth,
+        gridHeight: targetHeight,
+      );
+      _tickAccumulator = Duration.zero;
+      _lastTickTimestamp = null;
+    }
+  }
+
+  void _handleTick(Duration elapsed) {
+    final engine = _engine;
+    if (engine == null) {
+      _lastTickTimestamp = elapsed;
+      return;
+    }
+
+    final previous = _lastTickTimestamp;
+    _lastTickTimestamp = elapsed;
+    if (previous == null) {
+      return;
+    }
+
+    _tickAccumulator += elapsed - previous;
+
+    var didAdvance = false;
+    while (true) {
+      final interval = engine.state.tickInterval;
+      if (_tickAccumulator < interval) {
+        break;
       }
-    });
+      _tickAccumulator -= interval;
+      engine.advance();
+      didAdvance = true;
+      if (engine.state.isGameOver) {
+        _tickAccumulator = Duration.zero;
+        break;
+      }
+    }
+
+    if (didAdvance && mounted) {
+      setState(() {});
+    }
   }
 
   void _restart() {
-    _engine.reset();
+    final engine = _engine;
+    if (engine == null) {
+      return;
+    }
+    engine.reset();
+    _tickAccumulator = Duration.zero;
+    _lastTickTimestamp = null;
     setState(() {});
-    _scheduleTick();
+  }
+
+  void _handlePanStart(DragStartDetails details) {
+    _panDelta = Offset.zero;
+    _panDirectionCommitted = false;
   }
 
   void _handlePanUpdate(DragUpdateDetails details) {
-    final dx = details.delta.dx;
-    final dy = details.delta.dy;
+    final engine = _engine;
+    if (engine == null) {
+      return;
+    }
+    _panDelta += details.delta;
+    if (_panDirectionCommitted) {
+      return;
+    }
+    const threshold = 12.0;
+    final dx = _panDelta.dx;
+    final dy = _panDelta.dy;
+    if (dx.abs() < threshold && dy.abs() < threshold) {
+      return;
+    }
     if (dx.abs() > dy.abs()) {
       if (dx > 0) {
-        _engine.queueDirection(Direction.right);
+        engine.queueDirection(Direction.right);
       } else {
-        _engine.queueDirection(Direction.left);
+        engine.queueDirection(Direction.left);
       }
     } else {
       if (dy > 0) {
-        _engine.queueDirection(Direction.down);
+        engine.queueDirection(Direction.down);
       } else {
-        _engine.queueDirection(Direction.up);
+        engine.queueDirection(Direction.up);
       }
     }
-    setState(() {});
+    _panDirectionCommitted = true;
+  }
+
+  void _handlePanEnd(DragEndDetails details) {
+    _panDelta = Offset.zero;
+    _panDirectionCommitted = false;
   }
 
   LinearGradient get _gradient => const LinearGradient(
@@ -210,264 +288,141 @@ class _GameScreenState extends State<GameScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final state = _engine.state;
-
     return DecoratedBox(
       decoration: BoxDecoration(gradient: _gradient),
       child: SafeArea(
-        child: Stack(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _Header(state: state),
-                  const SizedBox(height: 16),
-                  _HarmonyMeter(state: state),
-                  const SizedBox(height: 16),
-                  Expanded(
-                    child: _GameBoard(
-                      state: state,
-                      onPanUpdate: _handlePanUpdate,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const _LegendPanel(),
-                  const SizedBox(height: 16),
-                ],
-              ),
-            ),
-            Positioned(
-              top: 16,
-              right: 16,
-              child: IconButton(
-                icon: const Icon(Icons.close_rounded, size: 32),
-                color: Colors.white.withOpacity(0.9),
-                onPressed: () {
-                  _timer?.cancel();
-                  widget.onExit();
-                },
-              ),
-            ),
-            if (state.isGameOver)
-              Positioned.fill(
-                child: _GameOverOverlay(
-                  onRestart: _restart,
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _Header extends StatelessWidget {
-  const _Header({required this.state});
-
-  final SnakeGameState state;
-
-  @override
-  Widget build(BuildContext context) {
-    final clampedPhase = state.phaseTurns.clamp(0, GameConfig.maxPhaseTurns).toInt();
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: const [
-              Text(
-                'Chromatic Current',
-                style: TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-              SizedBox(height: 6),
-              Text(
-                'Keep your elemental harmony high by weaving between different blooms.',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Color(0xff8f9bb5),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 16),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: const Color(0xff0d1324),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xff1f2a4c)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              const Text(
-                'Score',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Color(0xff6c7aa1),
-                ),
-              ),
-              Text(
-                '${state.score}',
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-              Text(
-                'Phase $clampedPhase',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Color(0xff7dd3fc),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _HarmonyMeter extends StatelessWidget {
-  const _HarmonyMeter({required this.state});
-
-  final SnakeGameState state;
-
-  @override
-  Widget build(BuildContext context) {
-    final segments = state.harmonySegments;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xff0d1324),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xff1b243d)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Harmony',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: Color(0xff9bb5ff),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              for (final (index, filled) in segments.indexed)
-                Expanded(
-                  child: Container(
-                    margin: EdgeInsets.only(right: index == segments.length - 1 ? 0 : 6),
-                    height: 12,
-                    decoration: BoxDecoration(
-                      color: filled ? const Color(0xff61dbff) : const Color(0xff1a2542),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: const Color(0xff1b243d)),
-                    ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            _ensureEngine(constraints);
+            final engine = _engine;
+            if (engine == null) {
+              return const SizedBox.shrink();
+            }
+            final state = engine.state;
+            return Stack(
+              children: [
+                Positioned.fill(
+                  child: _GameBoard(
+                    state: state,
+                    gridWidth: engine.gridWidth,
+                    gridHeight: engine.gridHeight,
+                    onPanStart: _handlePanStart,
+                    onPanUpdate: _handlePanUpdate,
+                    onPanEnd: _handlePanEnd,
                   ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            state.lastFood != null
-                ? 'Last: ${state.lastFood!.label}'
-                : 'Grab different blooms to build harmony.',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: state.lastFood != null
-                  ? Color(state.lastFood!.colorHex)
-                  : Colors.white.withOpacity(0.5),
-            ),
-          ),
-        ],
+                Positioned(
+                  top: 16,
+                  right: 16,
+                  child: IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 32),
+                    color: Colors.white.withOpacity(0.9),
+                    onPressed: () {
+                      _ticker.stop();
+                      widget.onExit();
+                    },
+                  ),
+                ),
+                if (state.isGameOver)
+                  Positioned.fill(
+                    child: _GameOverOverlay(
+                      onRestart: _restart,
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
 }
 
 class _GameBoard extends StatelessWidget {
-  const _GameBoard({required this.state, required this.onPanUpdate});
+  const _GameBoard({
+    required this.state,
+    required this.gridWidth,
+    required this.gridHeight,
+    required this.onPanStart,
+    required this.onPanUpdate,
+    required this.onPanEnd,
+  });
 
   final SnakeGameState state;
+  final int gridWidth;
+  final int gridHeight;
+  final GestureDragStartCallback onPanStart;
   final GestureDragUpdateCallback onPanUpdate;
+  final GestureDragEndCallback onPanEnd;
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final boardSize = constraints.biggest.shortestSide;
-        return Center(
-          child: GestureDetector(
-            onPanUpdate: onPanUpdate,
-            child: SizedBox(
-              width: boardSize,
-              height: boardSize,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: const Color(0xff05070f),
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: const Color(0xff10182d)),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(18),
-                    child: CustomPaint(
-                      painter: _BoardPainter(state),
-                    ),
-                  ),
-                ),
-              ),
+    return GestureDetector(
+      onPanStart: onPanStart,
+      onPanUpdate: onPanUpdate,
+      onPanEnd: onPanEnd,
+      child: DecoratedBox(
+        decoration: const BoxDecoration(
+          color: Color(0xff05070f),
+        ),
+        child: SizedBox.expand(
+          child: CustomPaint(
+            painter: _BoardPainter(
+              state,
+              gridWidth: gridWidth,
+              gridHeight: gridHeight,
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }
 
 class _BoardPainter extends CustomPainter {
-  _BoardPainter(this.state);
+  _BoardPainter(
+    this.state, {
+    required this.gridWidth,
+    required this.gridHeight,
+  });
 
   final SnakeGameState state;
+  final int gridWidth;
+  final int gridHeight;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final cellSize = size.width / GameConfig.gridSize;
+    final widthPerCell = size.width / gridWidth;
+    final heightPerCell = size.height / gridHeight;
+    final cellSize = min(widthPerCell, heightPerCell);
+    final boardWidth = cellSize * gridWidth;
+    final boardHeight = cellSize * gridHeight;
+    final offsetX = (size.width - boardWidth) / 2;
+    final offsetY = 0.0;
+    final boardRect = Rect.fromLTWH(offsetX, offsetY, boardWidth, boardHeight);
     final borderPaint = Paint()
       ..color = const Color(0xff0b1329)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.6;
 
     final backgroundPaint = Paint()..color = const Color(0xff070b18);
-    canvas.drawRect(Offset.zero & size, backgroundPaint);
+    canvas.drawRect(boardRect, backgroundPaint);
 
-    for (var y = 0; y < GameConfig.gridSize; y += 1) {
-      for (var x = 0; x < GameConfig.gridSize; x += 1) {
-        final rect = Rect.fromLTWH(x * cellSize, y * cellSize, cellSize, cellSize);
+    for (var y = 0; y < gridHeight; y += 1) {
+      for (var x = 0; x < gridWidth; x += 1) {
+        final rect = Rect.fromLTWH(
+          offsetX + (x * cellSize),
+          offsetY + (y * cellSize),
+          cellSize,
+          cellSize,
+        );
         canvas.drawRect(rect, borderPaint);
       }
     }
 
     final foodRect = Rect.fromLTWH(
-      state.food.position.x * cellSize,
-      state.food.position.y * cellSize,
+      offsetX + state.food.position.x * cellSize,
+      offsetY + state.food.position.y * cellSize,
       cellSize,
       cellSize,
     );
@@ -483,7 +438,12 @@ class _BoardPainter extends CustomPainter {
 
     for (var i = state.snake.length - 1; i >= 0; i -= 1) {
       final segment = state.snake[i];
-      final rect = Rect.fromLTWH(segment.x * cellSize, segment.y * cellSize, cellSize, cellSize);
+      final rect = Rect.fromLTWH(
+        offsetX + segment.x * cellSize,
+        offsetY + segment.y * cellSize,
+        cellSize,
+        cellSize,
+      );
       final paint = Paint()
         ..color = i == 0 ? const Color(0xff61dbff) : const Color(0xff32e0c4);
       final border = Paint()
@@ -497,7 +457,9 @@ class _BoardPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _BoardPainter oldDelegate) =>
-      oldDelegate.state != state;
+      oldDelegate.state != state ||
+      oldDelegate.gridWidth != gridWidth ||
+      oldDelegate.gridHeight != gridHeight;
 }
 
 class _LegendPanel extends StatelessWidget {
@@ -614,7 +576,8 @@ class _GameOverOverlay extends StatelessWidget {
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xff61dbff),
                 foregroundColor: const Color(0xff05070f),
-                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
                 shape: const StadiumBorder(),
                 textStyle: const TextStyle(
                   fontSize: 16,

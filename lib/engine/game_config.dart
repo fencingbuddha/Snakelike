@@ -1,5 +1,6 @@
 class GameConfig {
-  static const int gridSize = 18;
+  static const int gridWidth = 18;
+  static const int minGridHeight = 18;
   static const int minHarmony = 0;
   static const int maxHarmony = 6;
   static const int maxPhaseTurns = 12;

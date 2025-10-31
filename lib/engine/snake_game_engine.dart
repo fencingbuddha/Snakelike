@@ -73,16 +73,27 @@ class SnakeGameState {
 
 class SnakeGameEngine {
   SnakeGameEngine({
+    required this.gridWidth,
+    required this.gridHeight,
     required SnakeGameState initial,
     Random? random,
   }) : _random = random ?? Random() {
     this.state = initial;
   }
 
-  factory SnakeGameEngine.standard({Random? random}) {
+  final int gridWidth;
+  final int gridHeight;
+
+  factory SnakeGameEngine.standard({
+    required int gridWidth,
+    required int gridHeight,
+    Random? random,
+  }) {
     final rng = random ?? Random();
     return SnakeGameEngine(
-      initial: _createInitialState(rng),
+      gridWidth: gridWidth,
+      gridHeight: gridHeight,
+      initial: _createInitialState(gridWidth, gridHeight, rng),
       random: rng,
     );
   }
@@ -94,7 +105,7 @@ class SnakeGameEngine {
   set state(SnakeGameState next) => _state = next;
 
   void reset() {
-    state = _createInitialState(_random);
+    state = _createInitialState(gridWidth, gridHeight, _random);
   }
 
   void queueDirection(Direction direction) {
@@ -114,19 +125,25 @@ class SnakeGameEngine {
     final direction = current.queuedDirection;
     final newHead = current.head.offset(direction);
 
-    if (_isOutOfBounds(newHead)) {
+    if (_isOutOfBounds(newHead, gridWidth, gridHeight)) {
       state = current.copyWith(isGameOver: true);
       return;
     }
 
-    final body = <GridPosition>[newHead, ...current.snake];
+    final tail = current.snake.last;
+    final consumedFood = current.food.position == newHead;
+    final willGrow = consumedFood || current.growth > 0;
     final intersectsBody = current.snake.skip(1).contains(newHead);
     final phaseActive = current.phaseTurns > 0;
     if (intersectsBody && !phaseActive) {
-      state = current.copyWith(isGameOver: true);
-      return;
+      final tailEscaping = newHead == tail && !willGrow;
+      if (!tailEscaping) {
+        state = current.copyWith(isGameOver: true);
+        return;
+      }
     }
 
+    final body = <GridPosition>[newHead, ...current.snake];
     var growth = current.growth;
     var phaseTurns = current.phaseTurns;
     var score = current.score;
@@ -134,8 +151,6 @@ class SnakeGameEngine {
     var lastFood = current.lastFood;
     var snake = body;
     var food = current.food;
-
-    final consumedFood = food.position == newHead;
 
     if (consumedFood) {
       final metadata = food.type;
@@ -157,7 +172,7 @@ class SnakeGameEngine {
 
       growth += metadata.bonusGrowth;
       lastFood = food.type;
-      food = _spawnFood(_random, snake);
+      food = _spawnFood(_random, snake, gridWidth, gridHeight);
     } else {
       if (growth > 0) {
         growth -= 1;
@@ -185,9 +200,13 @@ class SnakeGameEngine {
   }
 }
 
-SnakeGameState _createInitialState(Random random) {
-  final snake = _initialSnake();
-  final food = _spawnFood(random, snake);
+SnakeGameState _createInitialState(
+  int gridWidth,
+  int gridHeight,
+  Random random,
+) {
+  final snake = _initialSnake(gridWidth, gridHeight);
+  final food = _spawnFood(random, snake, gridWidth, gridHeight);
   return SnakeGameState(
     snake: snake,
     direction: Direction.right,
@@ -202,21 +221,27 @@ SnakeGameState _createInitialState(Random random) {
   );
 }
 
-List<GridPosition> _initialSnake() {
-  final center = GameConfig.gridSize ~/ 2;
+List<GridPosition> _initialSnake(int gridWidth, int gridHeight) {
+  final centerX = gridWidth ~/ 2;
+  final centerY = gridHeight ~/ 2;
   return <GridPosition>[
-    GridPosition(center + 1, center),
-    GridPosition(center, center),
-    GridPosition(center - 1, center),
+    GridPosition(centerX + 1, centerY),
+    GridPosition(centerX, centerY),
+    GridPosition(centerX - 1, centerY),
   ];
 }
 
-Food _spawnFood(Random random, List<GridPosition> excluding) {
+Food _spawnFood(
+  Random random,
+  List<GridPosition> excluding,
+  int gridWidth,
+  int gridHeight,
+) {
   final occupied = excluding.toSet();
   final freeCells = <GridPosition>[];
 
-  for (var y = 0; y < GameConfig.gridSize; y += 1) {
-    for (var x = 0; x < GameConfig.gridSize; x += 1) {
+  for (var y = 0; y < gridHeight; y += 1) {
+    for (var x = 0; x < gridWidth; x += 1) {
       final position = GridPosition(x, y);
       if (!occupied.contains(position)) {
         freeCells.add(position);
@@ -253,9 +278,9 @@ FoodType _pickFoodType(Random random) {
   return FoodType.gale;
 }
 
-bool _isOutOfBounds(GridPosition position) {
+bool _isOutOfBounds(GridPosition position, int gridWidth, int gridHeight) {
   return position.x < 0 ||
       position.y < 0 ||
-      position.x >= GameConfig.gridSize ||
-      position.y >= GameConfig.gridSize;
+      position.x >= gridWidth ||
+      position.y >= gridHeight;
 }
