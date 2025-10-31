@@ -152,7 +152,7 @@ class GameScreen extends StatefulWidget {
 enum _HapticIntensity { light, heavy }
 
 class _GameScreenState extends State<GameScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   SnakeGameEngine? _engine;
   late final Ticker _ticker;
   Duration? _lastTickTimestamp;
