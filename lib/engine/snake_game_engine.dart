@@ -291,6 +291,7 @@ class SnakeGameEngine {
       final metadata = current.food.type;
       consumedType = metadata;
       score += metadata.baseScore + harmony * 2;
+      // Audio cue for food pickup handled externally via state change.
 
       if (food.type == FoodType.prism) {
         harmony = GameConfig.maxHarmony;
