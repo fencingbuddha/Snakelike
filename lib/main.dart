@@ -9,6 +9,7 @@ import 'engine/food.dart';
 import 'engine/game_config.dart';
 import 'engine/grid.dart';
 import 'engine/snake_game_engine.dart';
+import 'engine/missions.dart';
 
 void main() {
   runApp(const ChromaticCurrentApp());
@@ -165,11 +166,18 @@ class _GameScreenState extends State<GameScreen>
   double _foodPulseProgress = 0;
   late final AnimationController _shakeController;
   late final AnimationController _flashController;
+  late List<Mission> _dailyMissions;
+  late List<Mission> _weeklyMissions;
+  bool _missionsExpanded = false;
+  bool _isPaused = false;
 
   @override
   void initState() {
     super.initState();
     _ticker = createTicker(_handleTick)..start();
+    final missionSet = MissionGenerator.generate(DateTime.now());
+    _dailyMissions = missionSet.daily;
+    _weeklyMissions = missionSet.weekly;
     _shakeController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 420),
@@ -242,6 +250,7 @@ class _GameScreenState extends State<GameScreen>
       return;
     }
 
+    final previousState = engine.state;
     final previous = _lastTickTimestamp;
     _lastTickTimestamp = elapsed;
     if (previous == null) {
@@ -249,6 +258,18 @@ class _GameScreenState extends State<GameScreen>
     }
 
     final delta = elapsed - previous;
+    if (_isPaused) {
+      _sinceGlowFrame += delta;
+      _glowPhase =
+          (_glowPhase + delta.inMicroseconds / Duration.microsecondsPerSecond) %
+              (2 * pi);
+      if (_sinceGlowFrame >= const Duration(milliseconds: 32) && mounted) {
+        _sinceGlowFrame = Duration.zero;
+        setState(() {});
+      }
+      return;
+    }
+
     _tickAccumulator += delta;
     _sinceGlowFrame += delta;
     _glowPhase =
@@ -282,6 +303,10 @@ class _GameScreenState extends State<GameScreen>
       }
     }
 
+    final currentState = engine.state;
+    final missionsChanged =
+        _updateMissionProgress(previousState, currentState);
+
     final direction = engine.state.direction;
     final directionOffset = engine.state.isGameOver
         ? Offset.zero
@@ -302,7 +327,7 @@ class _GameScreenState extends State<GameScreen>
       _flashController.forward(from: 0);
     }
 
-    var shouldRepaint = didAdvance;
+    var shouldRepaint = didAdvance || missionsChanged;
     const glowFrameInterval = Duration(milliseconds: 32);
     if (!shouldRepaint && _sinceGlowFrame >= glowFrameInterval) {
       shouldRepaint = true;
@@ -332,6 +357,7 @@ class _GameScreenState extends State<GameScreen>
     _shakeController.value = 0;
     _flashController.stop();
     _flashController.value = 1;
+    _isPaused = false;
     setState(() {});
   }
 
@@ -391,6 +417,74 @@ class _GameScreenState extends State<GameScreen>
     }
   }
 
+  void _toggleMissions() {
+    setState(() {
+      _missionsExpanded = !_missionsExpanded;
+    });
+  }
+
+  bool _updateMissionProgress(
+    SnakeGameState previous,
+    SnakeGameState current,
+  ) {
+    var changed = false;
+
+    List<Mission> updateList(List<Mission> missions) {
+      final updated = <Mission>[];
+      for (final mission in missions) {
+        final next = _advanceMission(mission, previous, current);
+        if (next.progress != mission.progress) {
+          changed = true;
+        }
+        updated.add(next);
+      }
+      return updated;
+    }
+
+    if (_dailyMissions.isNotEmpty) {
+      _dailyMissions = updateList(_dailyMissions);
+    }
+    if (_weeklyMissions.isNotEmpty) {
+      _weeklyMissions = updateList(_weeklyMissions);
+    }
+
+    return changed;
+  }
+
+  Mission _advanceMission(
+    Mission mission,
+    SnakeGameState previous,
+    SnakeGameState current,
+  ) {
+    if (mission.isComplete) {
+      return mission;
+    }
+
+    switch (mission.kind) {
+      case MissionKind.collectFoodType:
+        if (current.consumedThisTick != null &&
+            current.consumedThisTick == mission.foodType) {
+          return mission.addProgress(1);
+        }
+        break;
+      case MissionKind.reachPhase:
+        final currentPhase = current.phaseTurns
+            .clamp(0, GameConfig.maxPhaseTurns)
+            .toInt();
+        if (currentPhase >= mission.target) {
+          return mission.copyWith(progress: mission.target);
+        }
+        break;
+      case MissionKind.scorePoints:
+        final delta = max(0, current.score - previous.score);
+        if (delta > 0) {
+          return mission.addProgress(delta);
+        }
+        break;
+    }
+    return mission;
+  }
+
   LinearGradient get _gradient => const LinearGradient(
         colors: [Color(0xff060913), Color(0xff0d1324)],
         begin: Alignment.topLeft,
@@ -448,6 +542,23 @@ class _GameScreenState extends State<GameScreen>
                     ),
                   ),
                 ),
+                Positioned(
+                  top: 24,
+                  left: 24,
+                  child: _EffectStatusOverlay(state: state),
+                ),
+                if (!_isPaused && !state.isGameOver)
+                  Positioned(
+                    left: 24,
+                    bottom: 24,
+                    child: _MissionSummaryButton(onTap: _toggleMissions),
+                  ),
+                if (engine.isCooperative)
+                  Positioned(
+                    right: 24,
+                    bottom: 24,
+                    child: _CoopBadge(coordinator: engine.coordinator!),
+                  ),
                 if (flashOpacity > 0.01)
                   Positioned.fill(
                     child: IgnorePointer(
@@ -470,19 +581,36 @@ class _GameScreenState extends State<GameScreen>
                 Positioned(
                   top: 16,
                   right: 16,
-                  child: IconButton(
-                    icon: const Icon(Icons.close_rounded, size: 32),
-                    color: Colors.white.withOpacity(0.9),
-                    onPressed: () {
-                      _ticker.stop();
-                      widget.onExit();
+                  child: _PauseButton(
+                    isPaused: _isPaused,
+                    onTap: () {
+                      setState(() {
+                        _isPaused = !_isPaused;
+                      });
                     },
                   ),
                 ),
+                if (_isPaused && !state.isGameOver)
+                  Positioned.fill(
+                    child: _PauseOverlay(
+                      onResume: () {
+                        setState(() {
+                          _isPaused = false;
+                        });
+                      },
+                      onRestart: _restart,
+                      onExit: widget.onExit,
+                      onViewMissions: _toggleMissions,
+                      missionsExpanded: _missionsExpanded,
+                      dailyMissions: _dailyMissions,
+                      weeklyMissions: _weeklyMissions,
+                    ),
+                  ),
                 if (state.isGameOver)
                   Positioned.fill(
                     child: _GameOverOverlay(
                       onRestart: _restart,
+                      onExit: widget.onExit,
                     ),
                   ),
               ],
@@ -596,6 +724,48 @@ class _BoardPainter extends CustomPainter {
       }
     }
 
+    if (state.hazards.isNotEmpty) {
+      final lifetime = max(1, GameConfig.hazardLifetimeTicks);
+      for (final hazard in state.hazards) {
+        final ratio = hazard.remainingTicks / lifetime;
+        final hazardRect = Rect.fromLTWH(
+          offsetX + hazard.position.x * cellSize,
+          offsetY + hazard.position.y * cellSize,
+          cellSize,
+          cellSize,
+        );
+        final baseColor = const Color(0xffef476f);
+        final hazardFill = Paint()
+          ..color = baseColor.withOpacity(0.35 + (1 - ratio) * 0.4);
+        final hazardBorder = Paint()
+          ..color = baseColor.withOpacity(0.8)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = cellSize * 0.08;
+        final hazardRRect = RRect.fromRectXY(
+          hazardRect.deflate(cellSize * 0.08),
+          cellSize * 0.32,
+          cellSize * 0.32,
+        );
+        canvas.drawRRect(hazardRRect, hazardFill);
+        canvas.drawRRect(hazardRRect, hazardBorder);
+
+        final crossPaint = Paint()
+          ..color = Colors.white.withOpacity(0.35 + (1 - ratio) * 0.3)
+          ..strokeWidth = cellSize * 0.04
+          ..strokeCap = StrokeCap.round;
+        canvas.drawLine(
+          hazardRect.centerLeft + Offset(cellSize * 0.15, 0),
+          hazardRect.centerRight - Offset(cellSize * 0.15, 0),
+          crossPaint,
+        );
+        canvas.drawLine(
+          hazardRect.topCenter + Offset(0, cellSize * 0.15),
+          hazardRect.bottomCenter - Offset(0, cellSize * 0.15),
+          crossPaint,
+        );
+      }
+    }
+
     final foodRect = Rect.fromLTWH(
       offsetX + state.food.position.x * cellSize,
       offsetY + state.food.position.y * cellSize,
@@ -703,6 +873,382 @@ class _BoardPainter extends CustomPainter {
       oldDelegate.gridHeight != gridHeight ||
       oldDelegate.glowPhase != glowPhase ||
       oldDelegate.foodPulseProgress != foodPulseProgress;
+}
+
+class _EffectStatusOverlay extends StatelessWidget {
+  const _EffectStatusOverlay({required this.state});
+
+  final SnakeGameState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final chips = <Widget>[];
+    final entries = state.activeEffects.entries.toList()
+      ..sort((a, b) => a.key.index.compareTo(b.key.index));
+    for (final entry in entries) {
+      chips.add(_StatusChip(
+        label: _effectLabel(entry.key),
+        detail: '${entry.value}t',
+        color: _effectColor(entry.key),
+      ));
+    }
+
+    if (state.hazards.isNotEmpty) {
+      chips.add(
+        _StatusChip(
+          label: 'Hazards',
+          detail: '${state.hazards.length} / ${GameConfig.maxHazards}',
+          color: const Color(0xffef476f),
+        ),
+      );
+    }
+
+    if (state.difficultyLevel > 0) {
+      chips.add(
+        _StatusChip(
+          label: 'Difficulty',
+          detail: 'Lv ${state.difficultyLevel}',
+          color: const Color(0xff4d96ff),
+        ),
+      );
+    }
+
+    if (chips.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xff0d1324).withOpacity(0.68),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xff202b46)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: chips,
+        ),
+      ),
+    );
+  }
+
+  Color _effectColor(FoodEffect effect) {
+    switch (effect) {
+      case FoodEffect.timeSlow:
+        return const Color(0xff76e5fc);
+      case FoodEffect.magnet:
+        return const Color(0xfff7b32b);
+      case FoodEffect.laneShift:
+        return const Color(0xfff25f5c);
+      case FoodEffect.none:
+        return const Color(0xff3ad29f);
+    }
+  }
+
+  String _effectLabel(FoodEffect effect) {
+    switch (effect) {
+      case FoodEffect.timeSlow:
+        return 'Time Warp';
+      case FoodEffect.magnet:
+        return 'Magnet';
+      case FoodEffect.laneShift:
+        return 'Lane Shift';
+      case FoodEffect.none:
+        return 'Boost';
+    }
+  }
+}
+
+class _MissionOverlay extends StatelessWidget {
+  const _MissionOverlay({
+    required this.daily,
+    required this.weekly,
+    required this.onClose,
+  });
+
+  final List<Mission> daily;
+  final List<Mission> weekly;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    if (daily.isEmpty && weekly.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 280),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: const Color(0xff0d1324).withOpacity(0.7),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xff1f2a4c)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Align(
+                alignment: Alignment.topRight,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(width: 24, height: 24),
+                  iconSize: 18,
+                  splashRadius: 18,
+                  icon: const Icon(Icons.close_rounded, color: Colors.white54),
+                  onPressed: onClose,
+                ),
+              ),
+              if (daily.isNotEmpty) ...[
+                const Text(
+                  'Daily Missions',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xff9bb5ff),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (final mission in daily)
+                  _MissionRow(mission: mission),
+              ],
+              if (weekly.isNotEmpty) ...[
+                if (daily.isNotEmpty) const SizedBox(height: 12),
+                const Text(
+                  'Weekly Missions',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xff9bb5ff),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (final mission in weekly)
+                  _MissionRow(mission: mission),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MissionRow extends StatelessWidget {
+  const _MissionRow({required this.mission});
+
+  final Mission mission;
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = mission.target == 0
+        ? 0.0
+        : mission.progress / mission.target;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            mission.description,
+            style: const TextStyle(
+              fontSize: 11,
+              color: Colors.white,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 4),
+          _MissionProgressBar(progress: progress, color: _missionColor(mission)),
+          const SizedBox(height: 2),
+          Text(
+            '${mission.progress}/${mission.target}',
+            style: TextStyle(
+              fontSize: 10,
+              color: Colors.white.withOpacity(0.7),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _missionColor(Mission mission) {
+    switch (mission.cadence) {
+      case MissionCadence.daily:
+        return const Color(0xff7dd3fc);
+      case MissionCadence.weekly:
+        return const Color(0xffc084fc);
+    }
+  }
+}
+
+class _MissionProgressBar extends StatelessWidget {
+  const _MissionProgressBar({
+    required this.progress,
+    required this.color,
+  });
+
+  final double progress;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 6,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Container(color: const Color(0xff1a2542)),
+            FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              widthFactor: progress.clamp(0.0, 1.0),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      color.withOpacity(0.8),
+                      color,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MissionSummaryButton extends StatelessWidget {
+  const _MissionSummaryButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton.icon(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xff0d1324).withOpacity(0.7),
+        foregroundColor: const Color(0xff7dd3fc),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        textStyle: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      onPressed: onTap,
+      icon: const Icon(Icons.star_border_rounded, size: 16),
+      label: const Text('View Missions'),
+    );
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({
+    required this.label,
+    required this.detail,
+    required this.color,
+  });
+
+  final String label;
+  final String detail;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        color: color.withOpacity(0.18),
+        border: Border.all(color: color.withOpacity(0.5)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            detail,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w500,
+              color: Colors.white.withOpacity(0.8),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CoopBadge extends StatelessWidget {
+  const _CoopBadge({required this.coordinator});
+
+  final CoopCoordinator coordinator;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xff0d1324).withOpacity(0.7),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xff1f2a4c)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            const Text(
+              'Co-op Seed',
+              style: TextStyle(
+                fontSize: 11,
+                color: Color(0xff7dd3fc),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            Text(
+              coordinator.seed.toString(),
+              style: const TextStyle(
+                fontSize: 12,
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              coordinator.sessionId,
+              style: TextStyle(
+                fontSize: 10,
+                color: Colors.white.withOpacity(0.7),
+                letterSpacing: 0.4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _ParallaxBackground extends StatelessWidget {
@@ -886,9 +1432,10 @@ class _LegendPanel extends StatelessWidget {
 }
 
 class _GameOverOverlay extends StatelessWidget {
-  const _GameOverOverlay({required this.onRestart});
+  const _GameOverOverlay({required this.onRestart, required this.onExit});
 
   final VoidCallback onRestart;
+  final VoidCallback onExit;
 
   @override
   Widget build(BuildContext context) {
@@ -898,6 +1445,14 @@ class _GameOverOverlay extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            Align(
+              alignment: Alignment.topRight,
+              child: IconButton(
+                icon: const Icon(Icons.close_rounded, size: 30),
+                color: Colors.white.withOpacity(0.85),
+                onPressed: onExit,
+              ),
+            ),
             const Text(
               'Harmony Shattered',
               style: TextStyle(
@@ -933,6 +1488,147 @@ class _GameOverOverlay extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _PauseOverlay extends StatelessWidget {
+  const _PauseOverlay({
+    required this.onResume,
+    required this.onRestart,
+    required this.onExit,
+    required this.onViewMissions,
+    required this.missionsExpanded,
+    required this.dailyMissions,
+    required this.weeklyMissions,
+  });
+
+  final VoidCallback onResume;
+  final VoidCallback onRestart;
+  final VoidCallback onExit;
+  final VoidCallback onViewMissions;
+  final bool missionsExpanded;
+  final List<Mission> dailyMissions;
+  final List<Mission> weeklyMissions;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(color: Colors.black.withOpacity(0.55)),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Run Paused',
+              style: TextStyle(
+                fontSize: 26,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 14),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.play_arrow_rounded),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xff61dbff),
+                foregroundColor: const Color(0xff05070f),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              onPressed: onResume,
+              label: const Text('Resume Run'),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.restart_alt_rounded),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Color(0xff61dbff)),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              onPressed: onRestart,
+              label: const Text('Restart'),
+            ),
+            const SizedBox(height: 10),
+            TextButton.icon(
+              onPressed: onExit,
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white70,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              ),
+              icon: const Icon(Icons.close_rounded),
+              label: const Text('Quit To Menu'),
+            ),
+            const SizedBox(height: 16),
+            if (missionsExpanded)
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 300),
+                child: _MissionOverlay(
+                  daily: dailyMissions,
+                  weekly: weeklyMissions,
+                  onClose: onViewMissions,
+                ),
+              )
+            else
+              ElevatedButton.icon(
+                icon: const Icon(Icons.star_border_rounded, size: 18),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xff0d1324).withOpacity(0.7),
+                  foregroundColor: const Color(0xff7dd3fc),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                onPressed: onViewMissions,
+                label: const Text('View Missions'),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PauseButton extends StatelessWidget {
+  const _PauseButton({required this.isPaused, required this.onTap});
+
+  final bool isPaused;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: Icon(
+        isPaused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+        size: 30,
+      ),
+      color: Colors.white.withOpacity(0.9),
+      onPressed: onTap,
     );
   }
 }

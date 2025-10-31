@@ -5,6 +5,46 @@ import 'food.dart';
 import 'game_config.dart';
 import 'grid.dart';
 
+class Hazard {
+  const Hazard({required this.position, required this.remainingTicks});
+
+  final GridPosition position;
+  final int remainingTicks;
+
+  Hazard tick() => Hazard(
+        position: position,
+        remainingTicks: remainingTicks - 1,
+      );
+}
+
+class _LaneShiftResult {
+  const _LaneShiftResult({required this.snake, required this.hazards});
+
+  final List<GridPosition> snake;
+  final List<Hazard> hazards;
+}
+
+class CoopCoordinator {
+  CoopCoordinator({
+    required this.sessionId,
+    required this.seed,
+  });
+
+  final String sessionId;
+  final int seed;
+  Direction? _remoteQueued;
+
+  void submitRemoteDirection(Direction direction) {
+    _remoteQueued = direction;
+  }
+
+  Direction? consumeRemoteDirection() {
+    final direction = _remoteQueued;
+    _remoteQueued = null;
+    return direction;
+  }
+}
+
 class SnakeGameState {
   SnakeGameState({
     required this.snake,
@@ -17,6 +57,12 @@ class SnakeGameState {
     required this.lastFood,
     required this.phaseTurns,
     required this.isGameOver,
+    required this.activeEffects,
+    required this.hazards,
+    required this.difficultyLevel,
+    required this.hazardCooldown,
+    required this.consumedThisTick,
+    required this.hazardSpawnedThisTick,
   });
 
   final List<GridPosition> snake;
@@ -29,13 +75,25 @@ class SnakeGameState {
   final FoodType? lastFood;
   final int phaseTurns;
   final bool isGameOver;
+  final Map<FoodEffect, int> activeEffects;
+  final List<Hazard> hazards;
+  final int difficultyLevel;
+  final int hazardCooldown;
+  final FoodType? consumedThisTick;
+  final bool hazardSpawnedThisTick;
 
   GridPosition get head => snake.first;
 
   Duration get tickInterval {
-    final base =
-        GameConfig.baseTickMilliseconds - harmony * GameConfig.tickHarmonyReduction;
+    final base = GameConfig.baseTickMilliseconds -
+        harmony * GameConfig.tickHarmonyReduction;
     final clamped = max(GameConfig.minTickMilliseconds, base);
+    final slowTicks = activeEffects[FoodEffect.timeSlow] ?? 0;
+    if (slowTicks > 0) {
+      return Duration(
+        milliseconds: (clamped * GameConfig.timeSlowMultiplier).round(),
+      );
+    }
     return Duration(milliseconds: clamped);
   }
 
@@ -55,6 +113,12 @@ class SnakeGameState {
     FoodType? lastFood,
     int? phaseTurns,
     bool? isGameOver,
+    Map<FoodEffect, int>? activeEffects,
+    List<Hazard>? hazards,
+    int? difficultyLevel,
+    int? hazardCooldown,
+    FoodType? consumedThisTick,
+    bool? hazardSpawnedThisTick,
   }) {
     return SnakeGameState(
       snake: snake ?? this.snake,
@@ -67,6 +131,13 @@ class SnakeGameState {
       lastFood: lastFood ?? this.lastFood,
       phaseTurns: phaseTurns ?? this.phaseTurns,
       isGameOver: isGameOver ?? this.isGameOver,
+      activeEffects: activeEffects ?? this.activeEffects,
+      hazards: hazards ?? this.hazards,
+      difficultyLevel: difficultyLevel ?? this.difficultyLevel,
+      hazardCooldown: hazardCooldown ?? this.hazardCooldown,
+      consumedThisTick: consumedThisTick ?? this.consumedThisTick,
+      hazardSpawnedThisTick:
+          hazardSpawnedThisTick ?? this.hazardSpawnedThisTick,
     );
   }
 }
@@ -77,34 +148,63 @@ class SnakeGameEngine {
     required this.gridHeight,
     required SnakeGameState initial,
     Random? random,
-  }) : _random = random ?? Random() {
-    this.state = initial;
+    this.seed,
+    CoopCoordinator? coop,
+  }) : _coop = coop {
+    final rng = random ?? (seed != null ? Random(seed) : Random());
+    _random = rng;
+    state = initial;
   }
 
   final int gridWidth;
   final int gridHeight;
+  final int? seed;
+  final CoopCoordinator? _coop;
+  late Random _random;
+
+  bool get isCooperative => _coop != null;
+  CoopCoordinator? get coordinator => _coop;
 
   factory SnakeGameEngine.standard({
     required int gridWidth,
     required int gridHeight,
+    int? seed,
     Random? random,
   }) {
-    final rng = random ?? Random();
+    final rng = random ?? (seed != null ? Random(seed) : Random());
     return SnakeGameEngine(
       gridWidth: gridWidth,
       gridHeight: gridHeight,
       initial: _createInitialState(gridWidth, gridHeight, rng),
       random: rng,
+      seed: seed,
+    );
+  }
+
+  factory SnakeGameEngine.cooperative({
+    required int gridWidth,
+    required int gridHeight,
+    required CoopCoordinator coordinator,
+    Random? random,
+  }) {
+    final rng = random ?? Random(coordinator.seed);
+    return SnakeGameEngine(
+      gridWidth: gridWidth,
+      gridHeight: gridHeight,
+      initial: _createInitialState(gridWidth, gridHeight, rng),
+      random: rng,
+      seed: coordinator.seed,
+      coop: coordinator,
     );
   }
 
   late SnakeGameState _state;
-  final Random _random;
 
   SnakeGameState get state => _state;
   set state(SnakeGameState next) => _state = next;
 
   void reset() {
+    _random = seed != null ? Random(seed) : Random();
     state = _createInitialState(gridWidth, gridHeight, _random);
   }
 
@@ -116,13 +216,41 @@ class SnakeGameEngine {
     state = current.copyWith(queuedDirection: direction);
   }
 
+  void submitRemoteDirection(Direction direction) {
+    _coop?.submitRemoteDirection(direction);
+  }
+
   void advance() {
     final current = state;
     if (current.isGameOver) {
       return;
     }
 
-    final direction = current.queuedDirection;
+    final effects =
+        Map<FoodEffect, int>.from(current.activeEffects);
+    var hazards = current.hazards
+        .map((hazard) =>
+            Hazard(position: hazard.position, remainingTicks: hazard.remainingTicks))
+        .toList();
+
+    var food = current.food;
+    final magnetActive = (effects[FoodEffect.magnet] ?? 0) > 0;
+    if (magnetActive) {
+      food = _pullFoodTowardsSnake(
+        current.snake,
+        food,
+        hazards,
+        gridWidth,
+        gridHeight,
+      );
+    }
+
+    final remoteDirection = _coop?.consumeRemoteDirection();
+    final proposedDirection = remoteDirection != null &&
+            !remoteDirection.isOpposite(current.direction)
+        ? remoteDirection
+        : current.queuedDirection;
+    final direction = proposedDirection;
     final newHead = current.head.offset(direction);
 
     if (_isOutOfBounds(newHead, gridWidth, gridHeight)) {
@@ -130,8 +258,13 @@ class SnakeGameEngine {
       return;
     }
 
+    if (hazards.any((hazard) => hazard.position == newHead)) {
+      state = current.copyWith(isGameOver: true);
+      return;
+    }
+
     final tail = current.snake.last;
-    final consumedFood = current.food.position == newHead;
+    final consumedFood = food.position == newHead;
     final willGrow = consumedFood || current.growth > 0;
     final intersectsBody = current.snake.skip(1).contains(newHead);
     final phaseActive = current.phaseTurns > 0;
@@ -143,17 +276,20 @@ class SnakeGameEngine {
       }
     }
 
-    final body = <GridPosition>[newHead, ...current.snake];
+    var snake = <GridPosition>[newHead, ...current.snake];
     var growth = current.growth;
     var phaseTurns = current.phaseTurns;
     var score = current.score;
     var harmony = current.harmony;
     var lastFood = current.lastFood;
-    var snake = body;
-    var food = current.food;
+    var difficultyLevel = current.difficultyLevel;
+    var hazardCooldown = max(0, current.hazardCooldown - 1);
+    FoodType? consumedType;
+    var hazardSpawned = false;
 
     if (consumedFood) {
-      final metadata = food.type;
+      final metadata = current.food.type;
+      consumedType = metadata;
       score += metadata.baseScore + harmony * 2;
 
       if (food.type == FoodType.prism) {
@@ -161,18 +297,48 @@ class SnakeGameEngine {
       } else if (lastFood == null) {
         harmony = min(GameConfig.maxHarmony, harmony + 1);
       } else if (lastFood == food.type) {
-        harmony = max(GameConfig.minHarmony, harmony - metadata.repeatPenalty);
+        harmony =
+            max(GameConfig.minHarmony, harmony - metadata.repeatPenalty);
       } else {
         harmony = min(GameConfig.maxHarmony, harmony + metadata.mixBoost);
       }
 
       if (metadata.phaseBonus > 0) {
-        phaseTurns = min(GameConfig.maxPhaseTurns, phaseTurns + metadata.phaseBonus);
+        phaseTurns = min(
+          GameConfig.maxPhaseTurns,
+          phaseTurns + metadata.phaseBonus,
+        );
       }
 
       growth += metadata.bonusGrowth;
-      lastFood = food.type;
-      food = _spawnFood(_random, snake, gridWidth, gridHeight);
+      lastFood = metadata;
+
+      if (metadata.effect == FoodEffect.laneShift) {
+        final shiftResult = _applyLaneShift(
+          snake,
+          hazards,
+          metadata.effectDuration,
+          gridWidth,
+          gridHeight,
+        );
+        snake = shiftResult.snake;
+        hazards = shiftResult.hazards;
+        if (_hasSelfCollision(snake) ||
+            hazards.any((hazard) => hazard.position == snake.first)) {
+          state = current.copyWith(isGameOver: true);
+          return;
+        }
+      } else if (metadata.effect != FoodEffect.none) {
+        effects[metadata.effect] = metadata.effectDuration;
+      }
+
+      food = _spawnFood(
+        _random,
+        snake,
+        gridWidth,
+        gridHeight,
+        hazards,
+      );
     } else {
       if (growth > 0) {
         growth -= 1;
@@ -185,6 +351,49 @@ class SnakeGameEngine {
       }
     }
 
+    if (_hasSelfCollision(snake) && !(phaseActive && !consumedFood)) {
+      state = current.copyWith(isGameOver: true);
+      return;
+    }
+
+    hazards = hazards
+        .map((hazard) => hazard.tick())
+        .where((hazard) => hazard.remainingTicks > 0)
+        .toList();
+
+    if (harmony >= GameConfig.harmonyDifficultyThreshold &&
+        hazardCooldown == 0 &&
+        hazards.length < GameConfig.maxHazards) {
+      difficultyLevel = min(
+        GameConfig.maxDifficultyLevel,
+        difficultyLevel + 1,
+      );
+      hazardCooldown = max(
+        2,
+        GameConfig.hazardSpawnInterval - difficultyLevel,
+      );
+      final hazard = _spawnHazard(
+        _random,
+        snake,
+        food.position,
+        hazards,
+        gridWidth,
+        gridHeight,
+      );
+      if (hazard != null) {
+        hazards = [...hazards, hazard];
+        hazardSpawned = true;
+      }
+    }
+
+    final nextEffects = <FoodEffect, int>{};
+    effects.forEach((effect, duration) {
+      final next = duration - 1;
+      if (next > 0) {
+        nextEffects[effect] = next;
+      }
+    });
+
     state = SnakeGameState(
       snake: snake,
       direction: direction,
@@ -196,6 +405,12 @@ class SnakeGameEngine {
       lastFood: lastFood,
       phaseTurns: phaseTurns,
       isGameOver: false,
+      activeEffects: nextEffects,
+      hazards: hazards,
+      difficultyLevel: difficultyLevel,
+      hazardCooldown: hazardCooldown,
+      consumedThisTick: consumedType,
+      hazardSpawnedThisTick: hazardSpawned,
     );
   }
 }
@@ -206,7 +421,8 @@ SnakeGameState _createInitialState(
   Random random,
 ) {
   final snake = _initialSnake(gridWidth, gridHeight);
-  final food = _spawnFood(random, snake, gridWidth, gridHeight);
+  final hazards = <Hazard>[];
+  final food = _spawnFood(random, snake, gridWidth, gridHeight, hazards);
   return SnakeGameState(
     snake: snake,
     direction: Direction.right,
@@ -218,6 +434,12 @@ SnakeGameState _createInitialState(
     lastFood: null,
     phaseTurns: 0,
     isGameOver: false,
+    activeEffects: const {},
+    hazards: hazards,
+    difficultyLevel: 0,
+    hazardCooldown: GameConfig.initialHazardCooldown,
+    consumedThisTick: null,
+    hazardSpawnedThisTick: false,
   );
 }
 
@@ -233,11 +455,15 @@ List<GridPosition> _initialSnake(int gridWidth, int gridHeight) {
 
 Food _spawnFood(
   Random random,
-  List<GridPosition> excluding,
+  List<GridPosition> snake,
   int gridWidth,
   int gridHeight,
+  List<Hazard> hazards,
 ) {
-  final occupied = excluding.toSet();
+  final occupied = {
+    for (final segment in snake) segment,
+    for (final hazard in hazards) hazard.position,
+  };
   final freeCells = <GridPosition>[];
 
   for (var y = 0; y < gridHeight; y += 1) {
@@ -250,7 +476,7 @@ Food _spawnFood(
   }
 
   if (freeCells.isEmpty) {
-    return Food(position: excluding.first, type: FoodType.prism);
+    return Food(position: snake.first, type: FoodType.prism);
   }
 
   final position = freeCells[random.nextInt(freeCells.length)];
@@ -263,9 +489,13 @@ FoodType _pickFoodType(Random random) {
     MapEntry(FoodType.tidal, 3),
     MapEntry(FoodType.gale, 4),
     MapEntry(FoodType.prism, 1),
+    MapEntry(FoodType.chrono, 2),
+    MapEntry(FoodType.magnetar, 2),
+    MapEntry(FoodType.rift, 1),
   ];
 
-  final totalWeight = weighted.fold<int>(0, (sum, entry) => sum + entry.value);
+  final totalWeight =
+      weighted.fold<int>(0, (sum, entry) => sum + entry.value);
   final target = random.nextInt(totalWeight);
   var cumulative = 0;
   for (final entry in weighted) {
@@ -283,4 +513,128 @@ bool _isOutOfBounds(GridPosition position, int gridWidth, int gridHeight) {
       position.y < 0 ||
       position.x >= gridWidth ||
       position.y >= gridHeight;
+}
+
+Food _pullFoodTowardsSnake(
+  List<GridPosition> snake,
+  Food food,
+  List<Hazard> hazards,
+  int gridWidth,
+  int gridHeight,
+) {
+  final head = snake.first;
+  final dx = head.x - food.position.x;
+  final dy = head.y - food.position.y;
+  final distance = dx.abs() + dy.abs();
+  if (distance == 0 || distance > GameConfig.magnetRadius) {
+    return food;
+  }
+
+  var stepX = 0;
+  var stepY = 0;
+  if (dx.abs() > dy.abs()) {
+    stepX = dx.sign;
+  } else if (dy != 0) {
+    stepY = dy.sign;
+  } else if (dx != 0) {
+    stepX = dx.sign;
+  }
+
+  final nextPosition = GridPosition(
+    (food.position.x + stepX).clamp(0, gridWidth - 1).toInt(),
+    (food.position.y + stepY).clamp(0, gridHeight - 1).toInt(),
+  );
+
+  final occupiedPositions = {
+    for (final segment in snake) segment,
+    for (final hazard in hazards) hazard.position,
+  };
+
+  if (occupiedPositions.contains(nextPosition)) {
+    return food;
+  }
+
+  return Food(position: nextPosition, type: food.type);
+}
+
+_LaneShiftResult _applyLaneShift(
+  List<GridPosition> snake,
+  List<Hazard> hazards,
+  int rows,
+  int gridWidth,
+  int gridHeight,
+) {
+  if (rows == 0) {
+    return _LaneShiftResult(snake: snake, hazards: hazards);
+  }
+  final shift = rows % gridHeight;
+  final shiftedSnake = snake
+      .map((segment) => _shiftPosition(segment, shift, gridHeight))
+      .toList();
+  final shiftedHazards = hazards
+      .map(
+        (hazard) => Hazard(
+          position: _shiftPosition(hazard.position, shift, gridHeight),
+          remainingTicks: hazard.remainingTicks,
+        ),
+      )
+      .toList();
+  return _LaneShiftResult(
+    snake: shiftedSnake,
+    hazards: shiftedHazards,
+  );
+}
+
+GridPosition _shiftPosition(
+  GridPosition position,
+  int rows,
+  int gridHeight,
+) {
+  final newY = (position.y + rows) % gridHeight;
+  return GridPosition(position.x, newY);
+}
+
+bool _hasSelfCollision(List<GridPosition> snake) {
+  final seen = <GridPosition>{};
+  for (final segment in snake) {
+    if (!seen.add(segment)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+Hazard? _spawnHazard(
+  Random random,
+  List<GridPosition> snake,
+  GridPosition foodPosition,
+  List<Hazard> hazards,
+  int gridWidth,
+  int gridHeight,
+) {
+  final occupied = {
+    for (final segment in snake) segment,
+    foodPosition,
+    for (final hazard in hazards) hazard.position,
+  };
+  final candidates = <GridPosition>[];
+
+  for (var y = 0; y < gridHeight; y += 1) {
+    for (var x = 0; x < gridWidth; x += 1) {
+      final position = GridPosition(x, y);
+      if (!occupied.contains(position)) {
+        candidates.add(position);
+      }
+    }
+  }
+
+  if (candidates.isEmpty) {
+    return null;
+  }
+
+  final position = candidates[random.nextInt(candidates.length)];
+  return Hazard(
+    position: position,
+    remainingTicks: GameConfig.hazardLifetimeTicks,
+  );
 }
