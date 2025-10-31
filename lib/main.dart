@@ -154,6 +154,8 @@ class _GameScreenState extends State<GameScreen>
   late final Ticker _ticker;
   Duration? _lastTickTimestamp;
   Duration _tickAccumulator = Duration.zero;
+  Duration _sinceGlowFrame = Duration.zero;
+  double _glowPhase = 0;
   Offset _panDelta = Offset.zero;
   bool _panDirectionCommitted = false;
 
@@ -206,7 +208,12 @@ class _GameScreenState extends State<GameScreen>
       return;
     }
 
-    _tickAccumulator += elapsed - previous;
+    final delta = elapsed - previous;
+    _tickAccumulator += delta;
+    _sinceGlowFrame += delta;
+    _glowPhase =
+        (_glowPhase + delta.inMicroseconds / Duration.microsecondsPerSecond) %
+            (2 * pi);
 
     var didAdvance = false;
     while (true) {
@@ -223,7 +230,16 @@ class _GameScreenState extends State<GameScreen>
       }
     }
 
-    if (didAdvance && mounted) {
+    var shouldRepaint = didAdvance;
+    const glowFrameInterval = Duration(milliseconds: 32);
+    if (!shouldRepaint && _sinceGlowFrame >= glowFrameInterval) {
+      shouldRepaint = true;
+      _sinceGlowFrame = Duration.zero;
+    } else if (didAdvance) {
+      _sinceGlowFrame = Duration.zero;
+    }
+
+    if (shouldRepaint && mounted) {
       setState(() {});
     }
   }
@@ -236,6 +252,7 @@ class _GameScreenState extends State<GameScreen>
     engine.reset();
     _tickAccumulator = Duration.zero;
     _lastTickTimestamp = null;
+    _sinceGlowFrame = Duration.zero;
     setState(() {});
   }
 
@@ -306,6 +323,7 @@ class _GameScreenState extends State<GameScreen>
                     state: state,
                     gridWidth: engine.gridWidth,
                     gridHeight: engine.gridHeight,
+                    glowPhase: _glowPhase,
                     onPanStart: _handlePanStart,
                     onPanUpdate: _handlePanUpdate,
                     onPanEnd: _handlePanEnd,
@@ -343,6 +361,7 @@ class _GameBoard extends StatelessWidget {
     required this.state,
     required this.gridWidth,
     required this.gridHeight,
+    required this.glowPhase,
     required this.onPanStart,
     required this.onPanUpdate,
     required this.onPanEnd,
@@ -351,6 +370,7 @@ class _GameBoard extends StatelessWidget {
   final SnakeGameState state;
   final int gridWidth;
   final int gridHeight;
+  final double glowPhase;
   final GestureDragStartCallback onPanStart;
   final GestureDragUpdateCallback onPanUpdate;
   final GestureDragEndCallback onPanEnd;
@@ -371,6 +391,7 @@ class _GameBoard extends StatelessWidget {
               state,
               gridWidth: gridWidth,
               gridHeight: gridHeight,
+              glowPhase: glowPhase,
             ),
           ),
         ),
@@ -384,11 +405,13 @@ class _BoardPainter extends CustomPainter {
     this.state, {
     required this.gridWidth,
     required this.gridHeight,
+    required this.glowPhase,
   });
 
   final SnakeGameState state;
   final int gridWidth;
   final int gridHeight;
+  final double glowPhase;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -408,6 +431,10 @@ class _BoardPainter extends CustomPainter {
     final backgroundPaint = Paint()..color = const Color(0xff070b18);
     canvas.drawRect(boardRect, backgroundPaint);
 
+    final glowPulse = (sin(glowPhase) + 1) / 2;
+    final foodPulse = (sin(glowPhase * 1.6) + 1) / 2;
+    final gridAlpha = 0.25 + glowPulse * 0.1;
+
     for (var y = 0; y < gridHeight; y += 1) {
       for (var x = 0; x < gridWidth; x += 1) {
         final rect = Rect.fromLTWH(
@@ -416,7 +443,12 @@ class _BoardPainter extends CustomPainter {
           cellSize,
           cellSize,
         );
-        canvas.drawRect(rect, borderPaint);
+        canvas.drawRect(
+          rect,
+          borderPaint
+            ..color = const Color(0xff0b1329).withOpacity(gridAlpha)
+            ..strokeWidth = 0.6,
+        );
       }
     }
 
@@ -426,15 +458,35 @@ class _BoardPainter extends CustomPainter {
       cellSize,
       cellSize,
     );
-    final foodPaint = Paint()
-      ..color = Color(state.food.type.colorHex)
-      ..style = PaintingStyle.fill;
-    final foodBorder = Paint()
-      ..color = Colors.white.withOpacity(0.13)
+    final foodColor = Color(state.food.type.colorHex);
+    final foodRadius = cellSize * 0.3;
+    final foodGlowPaint = Paint()
+      ..color = foodColor.withOpacity(0.55)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    canvas.drawRect(foodRect, foodPaint);
-    canvas.drawRect(foodRect.deflate(0.5), foodBorder);
+      ..strokeWidth = cellSize * (0.28 + foodPulse * 0.12)
+      ..maskFilter =
+          MaskFilter.blur(BlurStyle.normal, cellSize * (0.7 + foodPulse * 0.4));
+    final foodGlowRect = RRect.fromRectXY(
+        foodRect.inflate(cellSize * (0.45 + foodPulse * 0.2)),
+        foodRadius,
+        foodRadius);
+    canvas.drawRRect(foodGlowRect, foodGlowPaint);
+
+    final foodFill = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          foodColor.withOpacity(0.95),
+          foodColor.withOpacity(0.6),
+        ],
+      ).createShader(foodRect);
+    final foodBorder = Paint()
+      ..color = Colors.white.withOpacity(0.2 + foodPulse * 0.2)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = cellSize * 0.08;
+    final foodRRect = RRect.fromRectXY(
+        foodRect.deflate(cellSize * 0.1), foodRadius, foodRadius);
+    canvas.drawRRect(foodRRect, foodFill);
+    canvas.drawRRect(foodRRect.deflate(cellSize * 0.04), foodBorder);
 
     for (var i = state.snake.length - 1; i >= 0; i -= 1) {
       final segment = state.snake[i];
@@ -444,14 +496,44 @@ class _BoardPainter extends CustomPainter {
         cellSize,
         cellSize,
       );
-      final paint = Paint()
-        ..color = i == 0 ? const Color(0xff61dbff) : const Color(0xff32e0c4);
+      final isHead = i == 0;
+      final segmentColor = isHead
+          ? const Color(0xff61dbff)
+          : const Color(0xff32e0c4).withOpacity(0.9);
+      final glowSigma = cellSize * (0.7 + glowPulse * 0.5);
+      final glowExpansion = cellSize * (0.45 + glowPulse * 0.3);
+      final glowPaint = Paint()
+        ..color = segmentColor.withOpacity(isHead ? 0.7 : 0.5 + glowPulse * 0.2)
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, glowSigma);
+      final glowRRect = RRect.fromRectXY(
+        rect.inflate(glowExpansion),
+        cellSize * 0.7,
+        cellSize * 0.7,
+      );
+      canvas.drawRRect(glowRRect, glowPaint);
+
+      final fillRRect = RRect.fromRectXY(
+        rect.deflate(cellSize * 0.12),
+        cellSize * 0.4,
+        cellSize * 0.4,
+      );
+      final fillPaint = Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            segmentColor.withOpacity(0.95),
+            segmentColor.withOpacity(0.65),
+          ],
+        ).createShader(rect);
+      canvas.drawRRect(fillRRect, fillPaint);
+
       final border = Paint()
-        ..color = i == 0 ? const Color(0xff9bf6ff) : const Color(0xff22b498)
+        ..color = (isHead ? const Color(0xffc8f3ff) : const Color(0xff22b498))
+            .withOpacity(0.8)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.2;
-      canvas.drawRect(rect, paint);
-      canvas.drawRect(rect.deflate(0.5), border);
+        ..strokeWidth = cellSize * 0.1;
+      canvas.drawRRect(fillRRect.deflate(cellSize * 0.05), border);
     }
   }
 
@@ -459,7 +541,8 @@ class _BoardPainter extends CustomPainter {
   bool shouldRepaint(covariant _BoardPainter oldDelegate) =>
       oldDelegate.state != state ||
       oldDelegate.gridWidth != gridWidth ||
-      oldDelegate.gridHeight != gridHeight;
+      oldDelegate.gridHeight != gridHeight ||
+      oldDelegate.glowPhase != glowPhase;
 }
 
 class _LegendPanel extends StatelessWidget {
