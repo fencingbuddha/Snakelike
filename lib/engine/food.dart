@@ -1,6 +1,13 @@
 import 'game_config.dart';
 import 'grid.dart';
 
+enum FoodEffect {
+  none,
+  timeSlow,
+  magnet,
+  laneShift,
+}
+
 enum FoodType {
   ember(
     colorHex: 0xffff6b6b,
@@ -41,6 +48,42 @@ enum FoodType {
     mixBoost: GameConfig.maxHarmony,
     repeatPenalty: 0,
     phaseBonus: 6,
+  ),
+  chrono(
+    colorHex: 0xff76e5fc,
+    label: 'Chrono Seed',
+    description: 'Slows time for a short burst.',
+    baseScore: 24,
+    bonusGrowth: 0,
+    mixBoost: 1,
+    repeatPenalty: 0,
+    phaseBonus: 0,
+    effect: FoodEffect.timeSlow,
+    effectDuration: GameConfig.timeSlowDurationTicks,
+  ),
+  magnetar(
+    colorHex: 0xfff7b32b,
+    label: 'Magnetar Bloom',
+    description: 'Pulls distant blooms into your orbit.',
+    baseScore: 20,
+    bonusGrowth: 0,
+    mixBoost: 1,
+    repeatPenalty: 0,
+    phaseBonus: 0,
+    effect: FoodEffect.magnet,
+    effectDuration: GameConfig.magnetDurationTicks,
+  ),
+  rift(
+    colorHex: 0xfff25f5c,
+    label: 'Rift Spore',
+    description: 'Shifts the whole lane layout to keep you nimble.',
+    baseScore: 26,
+    bonusGrowth: 0,
+    mixBoost: 1,
+    repeatPenalty: 0,
+    phaseBonus: 0,
+    effect: FoodEffect.laneShift,
+    effectDuration: GameConfig.laneShiftRows,
   );
 
   const FoodType({
@@ -52,6 +95,8 @@ enum FoodType {
     required this.mixBoost,
     required this.repeatPenalty,
     required this.phaseBonus,
+    this.effect = FoodEffect.none,
+    this.effectDuration = 0,
   });
 
   final int colorHex;
@@ -62,6 +107,8 @@ enum FoodType {
   final int mixBoost;
   final int repeatPenalty;
   final int phaseBonus;
+  final FoodEffect effect;
+  final int effectDuration;
 }
 
 class Food {
